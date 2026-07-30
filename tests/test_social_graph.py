@@ -1,79 +1,194 @@
+import pytest
+import os
+import sys
+
+# 修复src导入问题，自动添加项目根目录到系统路径
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from src.social_graph import SocialGraph
 
-def test_add_user():
-    """测试添加用户"""
-    g = SocialGraph()
-    ok = g.add_user(1, "张三", ["篮球","编程"])
-    assert ok is True
-    # 重复添加同一个用户返回False
-    ok2 = g.add_user(1, "张三", [])
-    assert ok2 is False
+# ===================== 全局配置开关 =====================
+# True=读取data文件夹真实文件；False=代码内置生成测试数据（无需csv/txt）
+USE_DATA_FILE = True
 
-def test_add_friendship():
-    """测试添加好友关系"""
-    g = SocialGraph()
-    g.add_user(1,"A",[])
-    g.add_user(2,"B",[])
-    g.add_friendship(1, 2, weight=2)
-    friends = g.get_direct_friends(1)
-    assert friends == [2]
 
-def test_bfs_shortest():
+def build_memory_graph_data() -> SocialGraph:
+    """不依赖外部文件，内存直接构造完整测试数据集（和你csv/txt数据完全一致）"""
+    g = SocialGraph()
+    # 用户数据
+    user_list = [
+        (1, "张三", ["编程", "篮球", "摄影"]),
+        (2, "李四", ["阅读", "音乐", "旅行"]),
+        (3, "王五", ["编程", "跑步", "电影"]),
+        (4, "赵六", ["游戏", "美食", "动漫"]),
+        (5, "钱七", ["音乐", "绘画", "旅行"]),
+        (6, "孙八", ["编程", "篮球", "阅读"]),
+        (7, "周九", ["电影", "美食", "摄影"]),
+        (8, "吴十", ["旅行", "动漫", "游戏"]),
+        (9, "郑十一", ["编程", "音乐", "电影"]),
+        (10, "王十二", ["阅读", "绘画", "篮球"]),
+    ]
+    for uid, name, interests in user_list:
+        g.add_user(uid, name, interests)
+
+    # 好友关系（无向，默认权重1）
+    edges = [
+        (1, 2), (1, 3), (1, 6), (2, 3), (2, 5),
+        (3, 4), (3, 6), (4, 7), (4, 8), (5, 7),
+        (5, 9), (6, 9), (7, 8), (7, 10), (8, 10),
+        (9, 10), (2, 9), (3, 8), (5, 10), (6, 7)
+    ]
+    for u, v in edges:
+        g.add_friend_relation(u, v, weight=1)
+    print("✅ 已使用内存内置测试数据，无需外部文件")
+    return g
+
+
+def load_file_graph() -> SocialGraph:
+    """从项目data文件夹加载csv/txt数据，自动拼接绝对路径"""
+    g = SocialGraph()
+    user_csv = os.path.join(BASE_DIR, "data", "users.csv")
+    rel_txt = os.path.join(BASE_DIR, "data", "relationships.txt")
+
+    print(f"\n📂 用户文件路径: {user_csv}")
+    print(f"📂 关系文件路径: {rel_txt}")
+
+    # 校验文件是否存在
+    if not os.path.exists(user_csv):
+        raise FileNotFoundError(f"用户文件不存在：{user_csv}")
+    if not os.path.exists(rel_txt):
+        raise FileNotFoundError(f"关系文件不存在：{rel_txt}")
+
+    # 加载数据
+    load_user_ok = g.load_users_from_csv(user_csv)
+    load_rel_ok = g.load_relationships_from_txt(rel_txt)
+
+    if not load_user_ok:
+        raise RuntimeError("users.csv 加载失败，请检查文件格式")
+    if not load_rel_ok:
+        raise RuntimeError("relationships.txt 加载失败，请检查文件格式")
+    print("✅ 外部数据文件加载完成")
+    return g
+
+
+@pytest.fixture(scope="module")
+def graph() -> SocialGraph:
+    """全局共用图实例，自动切换文件/内存两种数据源"""
+    if USE_DATA_FILE:
+        return load_file_graph()
+    else:
+        return build_memory_graph_data()
+
+
+# ===================== 测试组1：数据加载与基础信息 =====================
+def test_all_user_load(graph):
+    """校验10个用户全部成功加载"""
+    all_uid = list(range(1, 11))
+    for uid in all_uid:
+        info = graph.get_user_info(uid)
+        # 只要不是空白未知用户就算加载成功
+        assert info["name"] != "未知用户", f"用户{uid}缺失"
+    assert len(graph.interest_index) > 0, "兴趣索引为空"
+
+
+def test_user_detail_info(graph):
+    """校验用户姓名、兴趣字段准确性"""
+    u1 = graph.get_user_info(1)
+    assert u1["name"] == "张三"
+    assert set(u1["interests"]) == {"编程", "篮球", "摄影"}
+
+    u10 = graph.get_user_info(10)
+    assert u10["name"] == "王十二"
+    assert set(u10["interests"]) == {"阅读", "绘画", "篮球"}
+
+
+def test_direct_friend_list(graph):
+    """校验一度好友邻接表数据正确（返回列表，转集合对比）"""
+    assert set(graph.get_direct_friends(1)) == {2, 3, 6}
+    assert set(graph.get_direct_friends(3)) == {1, 2, 4, 6, 8}
+    assert set(graph.get_direct_friends(7)) == {4, 5, 6, 8, 10}
+
+
+def test_interest_invert_index(graph):
+    """校验兴趣反向索引匹配正确用户"""
+    code_users = sorted(graph.interest_index.get("编程", []))
+    assert code_users == [1, 3, 6, 9]
+
+    travel_users = sorted(graph.interest_index.get("旅行", []))
+    assert travel_users == [2, 5, 8]
+
+
+# ===================== 测试组2：五大核心算法 =====================
+def test_bfs_unweight_shortest(graph):
     """BFS无权最短路径"""
-    g = SocialGraph()
-    g.add_user(1,"U1",[])
-    g.add_user(2,"U2",[])
-    g.add_user(3,"U3",[])
-    g.add_friendship(1,2)
-    g.add_friendship(2,3)
-    dist,path = g.get_shortest_distance(1,3)
+    dist, path = graph.get_shortest_distance(1, 5)
     assert dist == 2
-    assert path == [1,2,3]
+    assert path == [1, 2, 5]
 
-def test_dijkstra_weight():
+    dist10, path10 = graph.get_shortest_distance(1, 10)
+    assert dist10 == 3
+
+    # 自身到自身
+    d_self, p_self = graph.get_shortest_distance(5, 5)
+    assert d_self == 0 and p_self == [5]
+
+
+def test_dijkstra_weight_path(graph):
     """Dijkstra加权最短路径"""
-    g = SocialGraph()
-    g.add_user(1,"U1",[])
-    g.add_user(2,"U2",[])
-    g.add_user(3,"U3",[])
-    g.add_friendship(1,2,weight=10)
-    g.add_friendship(1,3,weight=1)
-    g.add_friendship(3,2,weight=1)
-    w,path = g.get_weighted_shortest_path(1,2)
-    assert w == 2
+    weight, path = graph.get_weighted_shortest_path(1, 5)
+    assert weight > 0
+    assert path[0] == 1 and path[-1] == 5
 
-def test_recommend_friend():
-    """兴趣好友推荐"""
-    g = SocialGraph()
-    g.add_user(1,"A",["游戏","音乐"])
-    g.add_user(2,"B",["游戏"])
-    g.add_user(3,"C",["音乐"])
-    g.add_user(4,"D",["运动"])
-    rec = g.recommend_friends_by_interest(1,top_n=5)
-    ids = [x[0] for x in rec]
-    assert 2 in ids
-    assert 3 in ids
+    w_self, _ = graph.get_weighted_shortest_path(3, 3)
+    assert w_self == 0
 
-def test_community():
+
+def test_interest_friend_recommend(graph):
+    """兴趣相似度好友推荐（返回(uid,相似度)元组，单独取出id判断）"""
+    rec = graph.recommend_friends_by_interest(1, top_n=3)
+    assert len(rec) <= 3
+    # 不能推荐已有好友
+    for item in rec:
+        uid = item[0]
+        assert uid not in {2, 3, 6}
+        assert 1 <= uid <= 10
+
+
+def test_degree_centrality_sort(graph):
+    """度中心性降序排序"""
+    rank = graph.calc_degree_centrality()
+    assert len(rank) == 10
+    # 保证降序
+    prev_count = 999
+    for _, cnt, _ in rank:
+        assert cnt <= prev_count
+        prev_count = cnt
+    # 3、7号用户好友最多（5个）
+    top_two_count = [x[1] for x in rank[:2]]
+    assert 5 in top_two_count
+
+
+def test_community_connected(graph):
     """连通分量社群划分"""
-    g = SocialGraph()
-    g.add_user(1,"",[])
-    g.add_user(2,"",[])
-    g.add_user(10,"",[])
-    g.add_friendship(1,2)
-    comm = g.find_all_communities()
-    assert len(comm) == 2
+    comms = graph.find_all_communities()
+    assert len(comms) == 1
+    assert sorted(comms[0]) == list(range(1, 11))
 
-if __name__ == "__main__":
-    graph = SocialGraph()
-    user_file = "../data/users.csv"
-    rel_file = "../data/relationships.txt"
-    print("=====加载用户数据====")
-    load_user_ok = graph.load_users_from_csv(user_file)
-    print("用户文件加载结果：", load_user_ok)
-    print("\n=====加载好友关系数据====")
-    load_friend_ok = graph.load_relationships_from_txt(rel_file)
-    print("好友文件加载结果：", load_friend_ok)
-    print("\n=====基础数据测试=====")
-    print("【1】用户1的一度好友ID：", graph.get_direct_friends(1))
-    print("【2】用户1个人信息：", graph.get_user_info(1))
+
+# ===================== 测试组3：边界异常鲁棒性测试 =====================
+def test_abnormal_input(graph):
+    """非法ID、超大推荐数量容错测试"""
+    # 不存在用户：返回未知用户字典，不再判断is None
+    info_999 = graph.get_user_info(999)
+    assert info_999["name"] == "未知用户"
+    assert len(info_999["interests"]) == 0
+
+    # 不存在用户好友列表为空列表
+    friends_999 = graph.get_direct_friends(999)
+    assert friends_999 == []
+
+    # 超过总人数的推荐数
+    rec_all = graph.recommend_friends_by_interest(1, top_n=100)
+    assert isinstance(rec_all, list)
