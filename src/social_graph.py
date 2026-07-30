@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 import csv
 import os
+import heapq
 from typing import Dict, Set, Tuple, List, Optional
 
 
@@ -69,8 +70,12 @@ class SocialGraph:
                 with open(filename, "r", encoding=encode) as f:
                     reader = csv.DictReader(f)
                     required_cols = ["用户ID", "姓名", "兴趣标签"]
+                    # 修复：判断表头是否为空
+                    if reader.fieldnames is None:
+                        print("CSV文件为空，无表头字段！")
+                        return False
                     if not all(col in reader.fieldnames for col in required_cols):
-                        print("CSV缺少必填中文列：用户ID,姓名,兴趣标签")
+                        print(f"CSV缺少必填中文列，必须包含：{required_cols}")
                         return False
                     success_count = 0
                     fail = 0
@@ -87,8 +92,8 @@ class SocialGraph:
                         except Exception as e:
                             print(f"第{row_idx}行解析失败：{str(e)}")
                             fail += 1
-                print(f"用户加载：成功{success_count}条，失败{fail}条")
-                return success_count > 0
+                    print(f"用户加载：成功{success_count}条，失败{fail}条")
+                    return success_count > 0
             except UnicodeDecodeError:
                 continue
         print("所有编码解析失败，文件编码异常")
@@ -106,7 +111,12 @@ class SocialGraph:
                     suc = 0
                     fail = 0
                     line_num = 0
-                    next(f)
+                    # 修复：捕获空白文件的StopIteration
+                    try:
+                        next(f)
+                    except StopIteration:
+                        print("关系TXT文件为空，无任何数据！")
+                        return False
                     for line in f:
                         line_num += 1
                         line = line.strip()
@@ -126,8 +136,8 @@ class SocialGraph:
                         except Exception as e:
                             print(f"第{line_num}行添加失败：{e}")
                             fail += 1
-                print(f"关系加载：成功{suc}条，失败{fail}条")
-                return suc > 0
+                    print(f"关系加载：成功{suc}条，失败{fail}条")
+                    return suc > 0
             except UnicodeDecodeError:
                 continue
         return False
@@ -156,24 +166,158 @@ class SocialGraph:
         """给UI展示区提供用户姓名、兴趣信息"""
         return self.user_attrs.get(user_id, {"name": "未知用户", "interests": []})
 
+    # ===================== 以下为你编写的算法模块 =====================
+    def get_shortest_distance(self, start_uid: int, end_uid: int) -> Tuple[int, List[int]]:
+        """
+        BFS广度优先遍历：无权图最短社交距离+完整路径回溯
+        返回：(距离值, 路径列表)
+        无法连通：返回 (-1, [])
+        """
+        if start_uid not in self.user_attrs or end_uid not in self.user_attrs:
+            return -1, []
+        if start_uid == end_uid:
+            return 0, [start_uid]
 
-# 本地测试入口
-if __name__ == "__main__":
-    graph = SocialGraph()
-    user_file = "../data/users.csv"
-    rel_file = "../data/relationships.txt"
+        prev_node: Dict[int, Optional[int]] = {}
+        q = deque([start_uid])
+        prev_node[start_uid] = None
 
-    print("=====加载用户数据====")
-    load_user_ok = graph.load_users_from_csv(user_file)
-    print("用户文件加载结果：", load_user_ok)
+        while q:
+            cur = q.popleft()
+            for neighbor in self.graph[cur]:
+                if neighbor not in prev_node:
+                    prev_node[neighbor] = cur
+                    q.append(neighbor)
+                    if neighbor == end_uid:
+                        q = deque()
+                        break
 
-    print("\n=====加载好友关系数据====")
-    load_friend_ok = graph.load_relationships_from_txt(rel_file)
-    print("好友文件加载结果：", load_friend_ok)
+        if end_uid not in prev_node:
+            return -1, []
 
-    print("\n=====数据结构测试输出=====")
-    print("【1】用户1的一度好友ID：", graph.get_direct_friends(1))
-    print("【2】用户1详细信息：", graph.get_user_info(1))
-    print("【3】爱好编程所有用户：", graph.interest_index.get("编程", []))
+        # 回溯生成路径
+        path = []
+        temp = end_uid
+        while temp is not None:
+            path.append(temp)
+            temp = prev_node[temp]
+        path.reverse()
+        dist = len(path) - 1
+        return dist, path
 
-    input("\n运行完成，回车关闭")
+    def get_weighted_shortest_path(self, start_uid: int, end_uid: int) -> Tuple[int, List[int]]:
+        """
+        Dijkstra迪杰斯特拉算法：计算带权重好友的最短路径（总权重最小）
+        返回：(总权重, 路径列表) 不可达返回 (-1, [])
+        """
+        if start_uid not in self.user_attrs or end_uid not in self.user_attrs:
+            return -1, []
+        if start_uid == end_uid:
+            return 0, [start_uid]
+
+        INF = float('inf')
+        dist: Dict[int, int] = {uid: INF for uid in self.user_attrs.keys()}
+        prev_node: Dict[int, Optional[int]] = {uid: None for uid in self.user_attrs.keys()}
+        dist[start_uid] = 0
+        heap = []
+        heapq.heappush(heap, (0, start_uid))
+
+        while heap:
+            cur_weight, cur_uid = heapq.heappop(heap)
+            if cur_uid == end_uid:
+                break
+            if cur_weight > dist[cur_uid]:
+                continue
+            # 遍历所有邻居
+            for neighbor in self.graph[cur_uid]:
+                edge_key = (min(cur_uid, neighbor), max(cur_uid, neighbor))
+                w = self.edge_weights[edge_key]
+                if dist[neighbor] > dist[cur_uid] + w:
+                    dist[neighbor] = dist[cur_uid] + w
+                    prev_node[neighbor] = cur_uid
+                    heapq.heappush(heap, (dist[neighbor], neighbor))
+
+        if dist[end_uid] == INF:
+            return -1, []
+
+        # 回溯路径
+        path = []
+        tmp = end_uid
+        while tmp is not None:
+            path.append(tmp)
+            tmp = prev_node[tmp]
+        path.reverse()
+        return dist[end_uid], path
+
+    def recommend_friends_by_interest(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, int]]:
+        """
+        基于兴趣重合度推荐陌生好友（核心推荐算法）
+        :param user_id: 目标用户ID
+        :param top_n: 推荐人数
+        :return: [(用户ID, 用户名, 共同兴趣数量)] 按分数降序排列
+        """
+        if user_id not in self.user_attrs:
+            return []
+        # 当前用户兴趣列表
+        my_interests = set(self.user_attrs[user_id]["interests"])
+        if not my_interests:
+            return []
+        # 已经是好友的用户集合，排除
+        my_friends = set(self.graph[user_id])
+        score_dict: Dict[int, int] = defaultdict(int)
+
+        # 遍历每一个兴趣，累加匹配分数
+        for interest in my_interests:
+            for uid in self.interest_index.get(interest, []):
+                if uid != user_id and uid not in my_friends:
+                    score_dict[uid] += 1
+
+        # 排序：共同兴趣从多到少，同分用户ID升序
+        sorted_users = sorted(score_dict.items(), key=lambda x: (-x[1], x[0]))
+        res = []
+        for uid, score in sorted_users[:top_n]:
+            name = self.user_attrs[uid]["name"]
+            res.append((uid, name, score))
+        return res
+
+    def calc_degree_centrality(self) -> List[Tuple[int, int, str]]:
+        """
+        度中心性计算：统计每个用户好友数量，找出社群核心用户
+        返回：[(用户ID, 好友总数, 用户名)] 好友数降序排列
+        """
+        centrality_list = []
+        for uid in self.user_attrs.keys():
+            friend_count = len(self.graph[uid])
+            uname = self.user_attrs[uid]["name"]
+            centrality_list.append((uid, friend_count, uname))
+        # 好友数量从大到小排序
+        centrality_list.sort(key=lambda x: (-x[1], x[0]))
+        return centrality_list
+
+    def find_all_communities(self) -> List[List[int]]:
+        """
+        连通分量查找：划分社交网络所有独立社群
+        返回：[[社群1所有用户ID], [社群2所有用户ID], ...]
+        """
+        visited = set()
+        communities = []
+        all_users = list(self.user_attrs.keys())
+
+        for uid in all_users:
+            if uid not in visited:
+                # BFS遍历整个连通子图
+                q = deque([uid])
+                visited.add(uid)
+                one_community = []
+                while q:
+                    cur = q.popleft()
+                    one_community.append(cur)
+                    for neighbor in self.graph[cur]:
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            q.append(neighbor)
+                one_community.sort()
+                communities.append(one_community)
+        return communities
+
+
