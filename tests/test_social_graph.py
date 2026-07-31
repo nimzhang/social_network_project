@@ -11,7 +11,7 @@ from src.social_graph import SocialGraph
 
 # ===================== 全局配置开关 =====================
 # True=读取data文件夹真实文件；False=代码内置生成测试数据（无需csv/txt）
-USE_DATA_FILE = True
+USE_DATA_FILE = False
 
 
 def build_memory_graph_data() -> SocialGraph:
@@ -40,8 +40,9 @@ def build_memory_graph_data() -> SocialGraph:
         (5, 9), (6, 9), (7, 8), (7, 10), (8, 10),
         (9, 10), (2, 9), (3, 8), (5, 10), (6, 7)
     ]
+    # 修复错误方法名：add_friend_relation → add_friendship
     for u, v in edges:
-        g.add_friend_relation(u, v, weight=1)
+        g.add_friendship(u, v, weight=1)
     print("✅ 已使用内存内置测试数据，无需外部文件")
     return g
 
@@ -120,7 +121,7 @@ def test_interest_invert_index(graph):
     assert travel_users == [2, 5, 8]
 
 
-# ===================== 测试组2：五大核心算法 =====================
+# ===================== 测试组2：五大核心算法 + 新增接口测试 =====================
 def test_bfs_unweight_shortest(graph):
     """BFS无权最短路径"""
     dist, path = graph.get_shortest_distance(1, 5)
@@ -145,15 +146,37 @@ def test_dijkstra_weight_path(graph):
     assert w_self == 0
 
 
+def test_second_degree_with_path(graph):
+    """测试高优先级：二度人脉带路径查询"""
+    second_list = graph.find_second_degree_with_path(1)
+    # 1的二度好友包含5、7、8、9、10等
+    assert len(second_list) > 0
+    # 校验返回元组结构 (uid, mid_id, path_list)
+    for item in second_list:
+        assert len(item) == 3
+        assert isinstance(item[2], list)
+
+
+def test_n_degree_unified_api(graph):
+    """测试统一N度人脉标准接口"""
+    # 一度好友
+    one_deg = graph.find_n_degree_friends(1, 1)
+    assert len(one_deg) == 3
+    # 二度好友
+    two_deg = graph.find_n_degree_friends(1, 2)
+    assert len(two_deg) > 0
+
+
 def test_interest_friend_recommend(graph):
-    """兴趣相似度好友推荐（返回(uid,相似度)元组，单独取出id判断）"""
+    """兴趣相似度好友推荐：验证小顶堆+共同兴趣详情"""
     rec = graph.recommend_friends_by_interest(1, top_n=3)
     assert len(rec) <= 3
-    # 不能推荐已有好友
+    # 返回结构：(uid, name, score, interest_list)
     for item in rec:
-        uid = item[0]
-        assert uid not in {2, 3, 6}
-        assert 1 <= uid <= 10
+        uid, name, score, inters = item
+        assert uid not in {2, 3, 6}  # 不推荐已有好友
+        assert isinstance(inters, list)
+        assert score == len(inters)  # 兴趣数量匹配分数
 
 
 def test_degree_centrality_sort(graph):
@@ -177,10 +200,10 @@ def test_community_connected(graph):
     assert sorted(comms[0]) == list(range(1, 11))
 
 
-# ===================== 测试组3：边界异常鲁棒性测试 =====================
+# ===================== 测试组3：边界异常 + 黑名单功能测试 =====================
 def test_abnormal_input(graph):
     """非法ID、超大推荐数量容错测试"""
-    # 不存在用户：返回未知用户字典，不再判断is None
+    # 不存在用户：返回未知用户字典
     info_999 = graph.get_user_info(999)
     assert info_999["name"] == "未知用户"
     assert len(info_999["interests"]) == 0
@@ -192,3 +215,18 @@ def test_abnormal_input(graph):
     # 超过总人数的推荐数
     rec_all = graph.recommend_friends_by_interest(1, top_n=100)
     assert isinstance(rec_all, list)
+
+
+def test_blacklist_filter(graph):
+    """黑名单过滤全功能测试"""
+    # 将5加入黑名单
+    graph.add_to_blacklist(5)
+    # 一度好友不再出现5
+    assert 5 not in graph.get_direct_friends(2)
+    # 最短路径无法抵达5
+    dist, _ = graph.get_shortest_distance(1, 5)
+    assert dist == -1
+    # 移出黑名单恢复
+    graph.remove_from_blacklist(5)
+    dist2, _ = graph.get_shortest_distance(1, 5)
+    assert dist2 == 2
