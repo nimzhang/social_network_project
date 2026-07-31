@@ -368,7 +368,7 @@ class SocialGraph:
     # ===================== 中优1+2：小顶堆TopK兴趣推荐 + 返回共同兴趣详情 =====================
     def recommend_friends_by_interest(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, int, List[str]]]:
         """
-        基于兴趣重合度推荐陌生好友：自研小顶堆实现TopK（不全局排序）
+        基于兴趣重合度推荐陌生的好友：自研小顶堆实现TopK（不全局排序）
         返回结构：[(用户ID, 用户名, 共同兴趣数量, 共同兴趣名称列表)]
         自动排除：自身、好友、黑名单用户
         """
