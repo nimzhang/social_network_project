@@ -62,7 +62,7 @@ def load_file_graph() -> SocialGraph:
     if not os.path.exists(rel_txt):
         raise FileNotFoundError(f"关系文件不存在：{rel_txt}")
 
-    # 加载的数据
+    # 加载数据
     load_user_ok = g.load_users_from_csv(user_csv)
     load_rel_ok = g.load_relationships_from_txt(rel_txt)
 
