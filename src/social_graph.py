@@ -3,6 +3,7 @@ import csv
 import os
 from typing import Dict, Set, Tuple, List, Optional
 
+
 # 1. 自主实现哈希表，链地址法，替代原生dict存储user_attrs
 class HashTable:
     def __init__(self, capacity=100):
@@ -38,6 +39,7 @@ class HashTable:
     # 新增方法，适配GUI的 in 判断，无需改动GUI
     def __contains__(self, key):
         return self.get(key) is not None
+
 
 # 2. 自主实现小顶堆，完全弃用heapq
 class MinHeap:
@@ -98,12 +100,12 @@ class SocialGraph:
         self.edge_weights: Dict[Tuple[int, int], int] = {}
         # 兴趣倒排索引，适配智能推荐模块
         self.interest_index: Dict[str, List[int]] = {}
-        # ===================== 新增：黑名单集合（中优3） =====================
+        # ===================== 新增：黑名单集合（中优3 扩展A） =====================
         self.blacklist: Set[int] = set()
 
-    # ===================== 黑名单全套接口（扩展A） =====================
+    # ===================== 黑名单全套接口（扩展A 完整实现） =====================
     def add_to_blacklist(self, user_id: int) -> bool:
-        """将用户加入黑名单"""
+        """将用户加入黑名单，不存在用户返回false"""
         if self.user_attrs.get(user_id) is None:
             return False
         self.blacklist.add(user_id)
@@ -121,46 +123,67 @@ class SocialGraph:
         return user_id in self.blacklist
 
     def clear_blacklist(self) -> None:
-        """清空黑名单（pytest测试收尾重置用）"""
+        """清空黑名单（测试用例重置环境）"""
         self.blacklist.clear()
 
-    # ===================== 新增必选：删除好友、删除用户两个核心方法 =====================
+    # ===================== 完善：删除好友、删除用户两个核心方法（加固边界逻辑） =====================
     def delete_friendship(self, user1: int, user2: int) -> bool:
-        """双向删除好友关系，同步清理边权重"""
+        """
+        双向删除好友关系，同步清理边权重
+        返回值：True=删除成功，False=用户不存在/并非好友/重复删除
+        """
+        # 校验两个用户都存在
         if self.user_attrs.get(user1) is None or self.user_attrs.get(user2) is None:
             return False
-        if user2 not in self.graph[user1]:
+        # 校验二者互为好友
+        if user2 not in self.graph[user1] or user1 not in self.graph[user2]:
             return False
-        self.graph[user1].remove(user2)
-        self.graph[user2].remove(user1)
+        # 双向移除邻接表好友
+        self.graph[user1].discard(user2)
+        self.graph[user2].discard(user1)
+        # 删除权重记录
         edge_key = (min(user1, user2), max(user1, user2))
         self.edge_weights.pop(edge_key, None)
         return True
 
     def delete_user(self, user_id: int) -> bool:
-        """删除用户节点：清空所有好友边、哈希表数据、兴趣索引"""
+        """
+        删除用户节点全链路清理：
+        1. 断开所有双向好友关系 2. 删除邻接表记录 3. 哈希表销毁用户数据
+        4. 兴趣索引剔除该用户 5. 黑名单移除该用户
+        返回：True删除成功 / False用户不存在
+        """
         if self.user_attrs.get(user_id) is None:
             return False
+
+        # 拷贝好友列表遍历，避免遍历中集合变动报错
         friend_list = list(self.graph.get(user_id, set()))
-        # 逐个删除所有好友连线
         for fid in friend_list:
             self.delete_friendship(user_id, fid)
-        # 邻接表删节点
+
+        # 删除邻接表该用户条目
         self.graph.pop(user_id, None)
-        # 先读取兴趣，再删除哈希表
+        # 取出用户兴趣数据后删除哈希表内用户
         user_info = self.user_attrs.get(user_id)
         self.user_attrs.remove(user_id)
-        # 清理兴趣倒排索引
-        if user_info:
-            interests = user_info.get("interests", [])
+
+        # 遍历兴趣倒排索引，移除当前用户ID
+        if user_info and "interests" in user_info:
+            interests = user_info["interests"]
             for tag in interests:
                 if tag in self.interest_index and user_id in self.interest_index[tag]:
                     self.interest_index[tag].remove(user_id)
-        # 黑名单同步清理
+            # 清理空兴趣分类（无用户的兴趣删掉）
+            empty_tags = [k for k, v in self.interest_index.items() if len(v) == 0]
+            for tag in empty_tags:
+                del self.interest_index[tag]
+
+        # 黑名单同步移除
         if user_id in self.blacklist:
             self.blacklist.remove(user_id)
         return True
-    # ===================== 原有基础增删改查（适配哈希表，适配黑名单过滤） =====================
+
+    # ===================== 原有基础增删改查（适配哈希表+全局黑名单过滤） =====================
     def add_user(self, user_id: int, name: str, interests: List[str] = None) -> bool:
         """添加用户，校验ID合法性，维护兴趣索引"""
         if not isinstance(user_id, int) or user_id <= 0:
@@ -188,7 +211,10 @@ class SocialGraph:
                 self.interest_index[interest].append(user_id)
 
     def add_friendship(self, user1: int, user2: int, weight: int = 1) -> bool:
-        """无向图双向添加好友，适配直接好友、社交距离模块"""
+        """
+        统一方法名：全程使用 add_friendship
+        无向图双向添加好友，适配直接好友、社交距离模块
+        """
         if user1 <= 0 or user2 <= 0:
             raise ValueError(f"用户ID必须为正整数，当前输入：{user1}, {user2}")
         if user1 == user2:
@@ -314,61 +340,52 @@ class SocialGraph:
             return {"name": "未知用户", "interests": []}
         return info
 
-    # ===================== 高优需求1：带路径二度人脉查询 =====================
+    # ===================== 【重点修复】带路径二度人脉查询（去重+严格过滤黑名单+固定路径长度3） =====================
     def find_second_degree_with_path(self, user_id: int) -> List[Tuple[int, int, List[int]]]:
         """
         查询目标用户所有二度人脉，附带连接路径
-        返回格式：[(二度用户ID, 中间好友ID, 完整路径列表), ...]
-        规则：
-        1. 排除自己、一度好友、黑名单用户
-        2. BFS遍历记录前驱节点回溯路径
+        返回格式：[(二度用户ID, 中间好友ID, 完整路径列表)]
+        约束规则（完全适配pytest断言）：
+        1. 排除自己、所有一度好友、黑名单用户
+        2. 同一个二度用户只保留1条路径（去重）
+        3. 路径固定长度=3：[起点,中间人,二度好友]
+        4. 自动屏蔽黑名单节点
         """
         if self.user_attrs.get(user_id) is None:
             return []
-        # 一度好友集合
-        first_degree = set(self.get_direct_friends(user_id))
-        visited = set()
-        prev_node: Dict[int, Optional[int]] = {}
-        q = deque()
-        q.append((user_id, 0))  # (当前节点, 当前度数)
-        prev_node[user_id] = None
-        visited.add(user_id)
 
-        second_degree_res = []
+        # 获取过滤黑名单后的一度好友集合
+        first_friends = set(self.get_direct_friends(user_id))
+        visited_second = set()  # 记录已经加入结果的二度用户，去重
+        result = []
 
-        while q:
-            cur_uid, depth = q.popleft()
-            # 深度超过2直接终止遍历（性能优化：提前截断）
-            if depth > 2:
-                continue
-            for neighbor in self.graph[cur_uid]:
-                # 黑名单、已访问节点直接跳过
-                if neighbor in self.blacklist or neighbor in visited:
+        # 遍历每一个中间一级好友
+        for mid_uid in first_friends:
+            # 获取中间人过滤黑名单后的好友列表
+            mid_all_friends = self.get_direct_friends(mid_uid)
+            for sec_uid in mid_all_friends:
+                # 多重筛选条件
+                if (sec_uid == user_id  # 排除自己
+                        or sec_uid in first_friends  # 排除一度好友
+                        or sec_uid in visited_second  # 去重二度节点
+                        or sec_uid in self.blacklist):  # 排除黑名单
                     continue
-                prev_node[neighbor] = cur_uid
-                visited.add(neighbor)
-                new_depth = depth + 1
-                if new_depth == 1:
-                    q.append((neighbor, new_depth))
-                # 命中二度人脉，回溯完整路径
-                elif new_depth == 2:
-                    path = []
-                    tmp = neighbor
-                    while tmp is not None:
-                        path.append(tmp)
-                        tmp = prev_node[tmp]
-                    path.reverse()
-                    mid_friend = path[1]  # 中间一度好友
-                    second_degree_res.append((neighbor, mid_friend, path))
-        return second_degree_res
 
-    # ===================== 高优需求2：统一N度人脉标准接口（收拢所有BFS人脉逻辑） =====================
+                visited_second.add(sec_uid)
+                path = [user_id, mid_uid, sec_uid]
+                result.append((sec_uid, mid_uid, path))
+
+        return result
+
+    # ===================== 高优需求2：统一N度人脉标准接口（收拢所有人脉BFS逻辑） =====================
     def find_n_degree_friends(self, user_id: int, n: int) -> List[int]:
         """
-        通用N度人脉查询统一接口
+        【核心收拢接口】通用N度人脉查询统一标准方法
         :param user_id: 起始用户ID
         :param n: 人脉度数（1=一度好友，2=二度好友）
         :return: 升序N度好友ID列表，自动过滤黑名单
+        ✅ 所有GUI层一度、二度、多度人脉查询全部调用本接口
+        ✅ GUI不再手写任何BFS遍历逻辑，严格遵循MVC分层
         """
         if self.user_attrs.get(user_id) is None or n <= 0:
             return []
@@ -422,7 +439,7 @@ class SocialGraph:
                 prev_node[neighbor] = cur
                 q.append(neighbor)
                 if neighbor == end_uid:
-                    q = deque()  # 清空队列提前退出循环
+                    q = deque()  # 清空队列提前退出循环，减少无效遍历
                     break
 
         if end_uid not in prev_node:
@@ -492,11 +509,12 @@ class SocialGraph:
         path.reverse()
         return dist[end_uid], path
 
-    # ===================== 中优1+2：自研小顶堆TopK兴趣推荐 =====================
+    # ===================== 中优1+2：自研小顶堆TopK兴趣推荐 + 推荐理由详情 =====================
     def recommend_friends_by_interest(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, int, List[str]]]:
         """
-        基于兴趣重合度推荐陌生好友：自研小顶堆实现TopK（不全局排序）
+        基于兴趣重合度推荐陌生好友：自研小顶堆实现TopK（不全局排序全量用户）
         返回结构：[(用户ID, 用户名, 共同兴趣数量, 共同兴趣名称列表)]
+        ✅ 补齐推荐理由：直接返回具体共同兴趣清单，满足任务书扩展C要求
         自动排除：自身、好友、黑名单用户
         """
         user_info = self.user_attrs.get(user_id)
@@ -516,7 +534,7 @@ class SocialGraph:
                 if candidate_uid not in exclude_users:
                     user_match_interests[candidate_uid].append(interest)
 
-        # ========== 完全替换为自研MinHeap，删除heapq依赖 ==========
+        # ========== 完全替换为自研MinHeap，删除heapq依赖，TopK渐进筛选 ==========
         heap = MinHeap()
         for cand_uid, inter_list in user_match_interests.items():
             score = len(inter_list)
@@ -531,7 +549,7 @@ class SocialGraph:
                 else:
                     heap.push(top_score, top_item)
 
-        # 取出堆内所有元素，降序排列
+        # 取出堆内所有元素，降序排列（兴趣多的在前）
         temp_list = []
         while heap.size() > 0:
             s, data = heap.pop()
@@ -543,7 +561,7 @@ class SocialGraph:
             final_res.append((uid, name, scr, inters))
         return final_res
 
-    # ===================== 原有保留算法接口 =====================
+    # ===================== 原有保留算法接口（全部兼容黑名单过滤） =====================
     def calc_degree_centrality(self) -> List[Tuple[int, int, str]]:
         """度中心性计算：统计每个用户好友数量，找出社群核心用户"""
         centrality_list = []
@@ -587,7 +605,56 @@ class SocialGraph:
                 communities.append(one_community)
         return communities
 
-    # ===================== 低优扩展预留：加权混合推荐接口（可后续填充） =====================
-    def recommend_friends_weight_mix(self, user_id: int, top_n: int = 5) -> List:
-        """扩展B：结合好友亲密度权重+共同兴趣混合评分推荐（预留实现入口）"""
-        pass
+    # ===================== 低优扩展B：加权混合推荐完整预留框架 =====================
+    def recommend_friends_weight_mix(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, float, List[str]]]:
+        """
+        扩展B：结合好友亲密度权重+共同兴趣混合评分推荐
+        混合公式示例：综合得分 = 共同兴趣数 * 0.6 + 好友亲密度均值 * 0.4
+        返回：[(用户ID, 姓名, 综合得分, 共同兴趣列表)]
+        """
+        user_info = self.user_attrs.get(user_id)
+        if not user_info:
+            return []
+        my_interests = set(user_info["interests"])
+        exclude = set(self.get_direct_friends(user_id)) | self.blacklist | {user_id}
+
+        # 1. 获取兴趣匹配用户
+        match_dict: Dict[int, List[str]] = defaultdict(list)
+        for inter in my_interests:
+            for uid in self.interest_index.get(inter, []):
+                if uid not in exclude:
+                    match_dict[uid].append(inter)
+
+        # 2. 遍历候选，计算混合分数
+        heap = MinHeap()
+        for cand_uid, inters in match_dict.items():
+            interest_score = len(inters)
+            # 计算候选用户与我方圈子亲密度均值
+            total_weight = 0
+            friend_cnt = 0
+            for mid_friend in self.get_direct_friends(user_id):
+                if cand_uid in self.graph[mid_friend]:
+                    key = (min(mid_friend, cand_uid), max(mid_friend, cand_uid))
+                    total_weight += self.edge_weights.get(key, 1)
+                    friend_cnt += 1
+            avg_weight = total_weight / friend_cnt if friend_cnt > 0 else 0
+            mix_score = round(interest_score * 0.6 + avg_weight * 0.4, 2)
+
+            cand_name = self.user_attrs.get(cand_uid)["name"]
+            item = (mix_score, cand_uid, cand_name, inters)
+            if heap.size() < top_n:
+                heap.push(mix_score, item)
+            else:
+                top_s, top_item = heap.pop()
+                if mix_score > top_s:
+                    heap.push(mix_score, item)
+                else:
+                    heap.push(top_s, top_item)
+
+        # 结果降序输出
+        res = []
+        while heap.size():
+            s, data = heap.pop()
+            res.append((data[1], data[2], s, data[3]))
+        res.sort(reverse=True, key=lambda x: x[2])
+        return res
