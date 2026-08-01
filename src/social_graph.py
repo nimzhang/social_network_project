@@ -341,3 +341,324 @@ class SocialGraph:
             return {"name": "未知用户", "interests": []}
         return info
 # ========================【数据结构代码结束】========================
+
+# ========================【算法代码开始】========================
+    # ===================== 【重点修复】带路径二度人脉查询（去重+严格过滤黑名单+固定路径长度3） =====================
+    def find_second_degree_with_path(self, user_id: int) -> List[Tuple[int, int, List[int]]]:
+        """
+        查询目标用户所有二度人脉，附带连接路径
+        返回格式：[(二度用户ID, 中间好友ID, 完整路径列表)]
+        约束规则（完全适配pytest断言）：
+        1. 排除自己、所有一度好友、黑名单用户
+        2. 同一个二度用户只保留1条路径（去重）
+        3. 路径固定长度=3：[起点,中间人,二度好友]
+        4. 自动屏蔽黑名单节点
+        """
+        if self.user_attrs.get(user_id) is None:
+            return []
+
+        # 获取过滤黑名单后的一度好友集合
+        first_friends = set(self.get_direct_friends(user_id))
+        visited_second = set()  # 记录已经加入结果的二度用户，去重
+        result = []
+
+        # 遍历每一个中间一级好友
+        for mid_uid in first_friends:
+            # 获取中间人过滤黑名单后的好友列表
+            mid_all_friends = self.get_direct_friends(mid_uid)
+            for sec_uid in mid_all_friends:
+                # 多重筛选条件
+                if (sec_uid == user_id  # 排除自己
+                        or sec_uid in first_friends  # 排除一度好友
+                        or sec_uid in visited_second  # 去重二度节点
+                        or sec_uid in self.blacklist):  # 排除黑名单
+                    continue
+
+                visited_second.add(sec_uid)
+                path = [user_id, mid_uid, sec_uid]
+                result.append((sec_uid, mid_uid, path))
+
+        return result
+
+    # ===================== 高优需求2：统一N度人脉标准接口（收拢所有人脉BFS逻辑） =====================
+    def find_n_degree_friends(self, user_id: int, n: int) -> List[int]:
+        """
+        【核心收拢接口】通用N度人脉查询统一标准方法
+        :param user_id: 起始用户ID
+        :param n: 人脉度数（1=一度好友，2=二度好友）
+        :return: 升序N度好友ID列表，自动过滤黑名单
+        ✅ 所有GUI层一度、二度、多度人脉查询全部调用本接口
+        ✅ GUI不再手写任何BFS遍历逻辑，严格遵循MVC分层
+        """
+        if self.user_attrs.get(user_id) is None or n <= 0:
+            return []
+        visited = set()
+        q = deque()
+        q.append((user_id, 0))
+        visited.add(user_id)
+        degree_result = defaultdict(list)
+
+        while q:
+            cur_uid, depth = q.popleft()
+            # 超过目标度数提前终止遍历（性能优化）
+            if depth >= n:
+                continue
+            for neighbor in self.graph[cur_uid]:
+                if neighbor in visited or neighbor in self.blacklist:
+                    continue
+                visited.add(neighbor)
+                new_depth = depth + 1
+                degree_result[new_depth].append(neighbor)
+                q.append((neighbor, new_depth))
+        target_list = degree_result.get(n, [])
+        target_list.sort()
+        return target_list
+
+    # ===================== BFS无权最短路径（全程过滤黑名单+性能优化） =====================
+    def get_shortest_distance(self, start_uid: int, end_uid: int) -> Tuple[int, List[int]]:
+        """
+        BFS广度优先遍历：无权图最短社交距离+完整路径回溯
+        返回：(距离值, 路径列表)
+        无法连通/目标在黑名单：返回 (-1, [])
+        """
+        # 基础合法性校验
+        if self.user_attrs.get(start_uid) is None or self.user_attrs.get(end_uid) is None:
+            return -1, []
+        if end_uid in self.blacklist:
+            return -1, []
+        if start_uid == end_uid:
+            return 0, [start_uid]
+
+        prev_node: Dict[int, Optional[int]] = {}
+        q = deque([start_uid])
+        prev_node[start_uid] = None
+
+        while q:
+            cur = q.popleft()
+            for neighbor in self.graph[cur]:
+                # 跳过黑名单、已访问节点
+                if neighbor in self.blacklist or neighbor in prev_node:
+                    continue
+                prev_node[neighbor] = cur
+                q.append(neighbor)
+                if neighbor == end_uid:
+                    q = deque()  # 清空队列提前退出循环，减少无效遍历
+                    break
+
+        if end_uid not in prev_node:
+            return -1, []
+
+        # 回溯生成路径
+        path = []
+        temp = end_uid
+        while temp is not None:
+            path.append(temp)
+            temp = prev_node[temp]
+        path.reverse()
+        dist = len(path) - 1
+        return dist, path
+
+    # ===================== Dijkstra加权最短路径（过滤黑名单） =====================
+    def get_weighted_shortest_path(self, start_uid: int, end_uid: int) -> Tuple[int, List[int]]:
+        """
+        Dijkstra迪杰斯特拉算法：计算带权重好友的最短路径（总权重最小）
+        返回：(总权重, 路径列表) 不可达/黑名单返回 (-1, [])
+        """
+        if self.user_attrs.get(start_uid) is None or self.user_attrs.get(end_uid) is None:
+            return -1, []
+        if end_uid in self.blacklist:
+            return -1, []
+        if start_uid == end_uid:
+            return 0, [start_uid]
+
+        INF = float('inf')
+        # 遍历哈希表取出全部用户ID
+        all_uids = []
+        for bucket in self.user_attrs.buckets:
+            for k, v in bucket:
+                all_uids.append(k)
+        dist: Dict[int, int] = {uid: INF for uid in all_uids}
+        prev_node: Dict[int, Optional[int]] = {uid: None for uid in all_uids}
+        dist[start_uid] = 0
+        heap = MinHeap()
+        heap.push(0, start_uid)
+
+        while heap.size() > 0:
+            cur_weight, cur_uid = heap.pop()
+            if cur_uid == end_uid:
+                break
+            if cur_weight > dist[cur_uid]:
+                continue
+            # 遍历邻居，跳过黑名单用户
+            for neighbor in self.graph[cur_uid]:
+                if neighbor in self.blacklist:
+                    continue
+                edge_key = (min(cur_uid, neighbor), max(cur_uid, neighbor))
+                w = self.edge_weights[edge_key]
+                if dist[neighbor] > dist[cur_uid] + w:
+                    dist[neighbor] = dist[cur_uid] + w
+                    prev_node[neighbor] = cur_uid
+                    heap.push(dist[neighbor], neighbor)
+
+        if dist[end_uid] == INF:
+            return -1, []
+
+        # 回溯路径
+        path = []
+        tmp = end_uid
+        while tmp is not None:
+            path.append(tmp)
+            tmp = prev_node[tmp]
+        path.reverse()
+        return dist[end_uid], path
+
+    # ===================== 中优1+2：自研小顶堆TopK兴趣推荐 + 推荐理由详情 =====================
+    def recommend_friends_by_interest(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, int, List[str]]]:
+        """
+        基于兴趣重合度推荐陌生好友：自研小顶堆实现TopK（不全局排序全量用户）
+        返回结构：[(用户ID, 用户名, 共同兴趣数量, 共同兴趣名称列表)]
+        ✅ 补齐推荐理由：直接返回具体共同兴趣清单，满足任务书扩展C要求
+        自动排除：自身、好友、黑名单用户
+        """
+        user_info = self.user_attrs.get(user_id)
+        if user_info is None:
+            return []
+        my_interests = set(user_info["interests"])
+        if not my_interests:
+            return []
+        # 已好友 + 黑名单全部排除
+        exclude_users = set(self.get_direct_friends(user_id)) | self.blacklist
+        exclude_users.add(user_id)
+
+        # key:候选用户ID, value:匹配兴趣列表
+        user_match_interests: Dict[int, List[str]] = defaultdict(list)
+        for interest in my_interests:
+            for candidate_uid in self.interest_index.get(interest, []):
+                if candidate_uid not in exclude_users:
+                    user_match_interests[candidate_uid].append(interest)
+
+        # ========== 完全替换为自研MinHeap，删除heapq依赖，TopK渐进筛选 ==========
+        heap = MinHeap()
+        for cand_uid, inter_list in user_match_interests.items():
+            score = len(inter_list)
+            cand_name = self.user_attrs.get(cand_uid)["name"]
+            item = (score, cand_uid, cand_name, inter_list)
+            if heap.size() < top_n:
+                heap.push(score, item)
+            else:
+                top_score, top_item = heap.pop()
+                if score > top_score:
+                    heap.push(score, item)
+                else:
+                    heap.push(top_score, top_item)
+
+        # 取出堆内所有元素，降序排列（兴趣多的在前）
+        temp_list = []
+        while heap.size() > 0:
+            s, data = heap.pop()
+            temp_list.append(data)
+        temp_list.sort(reverse=True, key=lambda x: (x[0], -x[1]))
+
+        final_res = []
+        for scr, uid, name, inters in temp_list:
+            final_res.append((uid, name, scr, inters))
+        return final_res
+
+    # ===================== 原有保留算法接口（全部兼容黑名单过滤） =====================
+    def calc_degree_centrality(self) -> List[Tuple[int, int, str]]:
+        """度中心性计算：统计每个用户好友数量，找出社群核心用户"""
+        centrality_list = []
+        # 遍历哈希表全部用户
+        all_uids = []
+        for bucket in self.user_attrs.buckets:
+            for k, v in bucket:
+                all_uids.append(k)
+        for uid in all_uids:
+            # 过滤黑名单后的有效好友数
+            valid_friends = [f for f in self.graph[uid] if f not in self.blacklist]
+            friend_count = len(valid_friends)
+            uname = self.user_attrs.get(uid)["name"]
+            centrality_list.append((uid, friend_count, uname))
+        centrality_list.sort(key=lambda x: (-x[1], x[0]))
+        return centrality_list
+
+    def find_all_communities(self) -> List[List[int]]:
+        """连通分量查找：划分社交网络所有独立社群，跳过黑名单节点"""
+        visited = set()
+        communities = []
+        all_uids = []
+        for bucket in self.user_attrs.buckets:
+            for k, v in bucket:
+                all_uids.append(k)
+        all_users = [uid for uid in all_uids if uid not in self.blacklist]
+
+        for uid in all_users:
+            if uid not in visited:
+                q = deque([uid])
+                visited.add(uid)
+                one_community = []
+                while q:
+                    cur = q.popleft()
+                    one_community.append(cur)
+                    for neighbor in self.graph[cur]:
+                        if neighbor not in visited and neighbor not in self.blacklist:
+                            visited.add(neighbor)
+                            q.append(neighbor)
+                one_community.sort()
+                communities.append(one_community)
+        return communities
+
+    # ===================== 低优扩展B：加权混合推荐完整预留框架 =====================
+    def recommend_friends_weight_mix(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, float, List[str]]]:
+        """
+        扩展B：结合好友亲密度权重+共同兴趣混合评分推荐
+        混合公式示例：综合得分 = 共同兴趣数 * 0.6 + 好友亲密度均值 * 0.4
+        返回：[(用户ID, 姓名, 综合得分, 共同兴趣列表)]
+        """
+        user_info = self.user_attrs.get(user_id)
+        if not user_info:
+            return []
+        my_interests = set(user_info["interests"])
+        exclude = set(self.get_direct_friends(user_id)) | self.blacklist | {user_id}
+
+        # 1. 获取兴趣匹配用户
+        match_dict: Dict[int, List[str]] = defaultdict(list)
+        for inter in my_interests:
+            for uid in self.interest_index.get(inter, []):
+                if uid not in exclude:
+                    match_dict[uid].append(inter)
+
+        # 2. 遍历候选，计算混合分数
+        heap = MinHeap()
+        for cand_uid, inters in match_dict.items():
+            interest_score = len(inters)
+            # 计算候选用户与我方圈子亲密度均值
+            total_weight = 0
+            friend_cnt = 0
+            for mid_friend in self.get_direct_friends(user_id):
+                if cand_uid in self.graph[mid_friend]:
+                    key = (min(mid_friend, cand_uid), max(mid_friend, cand_uid))
+                    total_weight += self.edge_weights.get(key, 1)
+                    friend_cnt += 1
+            avg_weight = total_weight / friend_cnt if friend_cnt > 0 else 0
+            mix_score = round(interest_score * 0.6 + avg_weight * 0.4, 2)
+
+            cand_name = self.user_attrs.get(cand_uid)["name"]
+            item = (mix_score, cand_uid, cand_name, inters)
+            if heap.size() < top_n:
+                heap.push(mix_score, item)
+            else:
+                top_s, top_item = heap.pop()
+                if mix_score > top_s:
+                    heap.push(mix_score, item)
+                else:
+                    heap.push(top_s, top_item)
+
+        # 结果降序输出
+        res = []
+        while heap.size():
+            s, data = heap.pop()
+            res.append((data[1], data[2], s, data[3]))
+        res.sort(reverse=True, key=lambda x: x[2])
+        return res
+# ========================【算法代码结束】========================
