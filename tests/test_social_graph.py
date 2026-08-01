@@ -4,7 +4,7 @@ import sys
 from typing import List, Tuple, Dict, Any
 
 # ===================== 路径导入配置 =====================
-# 修复src模块导入，将项目根目录加入系统环境变量
+# 修复 src 模块导入，将项目根目录加入系统环境变量
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -13,16 +13,18 @@ if BASE_DIR not in sys.path:
 from src.social_graph import SocialGraph, HashTable, MinHeap
 
 # ===================== 全局可配置开关 =====================
-# True：读取data目录csv/txt外部文件；False：内存内置生成测试数据（无需文件）
+# True：读取 data 目录 csv/txt 外部文件；False：内存内置生成测试数据（无需文件）
 USE_DATA_FILE: bool = False
-# 通用测试常量
+# 通用测试常量统一管理
 MAX_TEST_USER_NUM = 10
 INVALID_UID = 999
 SELF_UID_ERR = 1
+NEGATIVE_UID = -6  # 负数非法用户ID
+TOP_N_OVER_MAX = 200  # 超过总用户数的推荐参数
 
 # ===================== 通用工具函数（封装重复逻辑） =====================
 def print_test_title(title: str) -> None:
-    """打印分段测试标题，控制台区分模块"""
+    """打印分段测试标题，控制台区分模块，统一排版样式"""
     print(f"\n{'='*60}")
     print(f"🔍 {title}")
     print(f"{'='*60}")
@@ -31,10 +33,10 @@ def print_test_title(title: str) -> None:
 def build_memory_graph_data() -> SocialGraph:
     """
     内存离线构造社交网络数据集
-    完全等价于csv/txt文件数据，无需依赖外部磁盘文件
+    完全等价于 csv/txt 文件数据，无需依赖外部磁盘文件
     """
     g = SocialGraph()
-    # 用户元组：(用户ID, 姓名, 兴趣爱好列表)
+    # 用户元组：(用户 ID, 姓名，兴趣爱好列表)
     user_list = [
         (1, "张三", ["编程", "篮球", "摄影"]),
         (2, "李四", ["阅读", "音乐", "旅行"]),
@@ -50,7 +52,7 @@ def build_memory_graph_data() -> SocialGraph:
     for uid, name, interests in user_list:
         g.add_user(uid, name, interests)
 
-    # 无向好友边，默认边权重统一为1
+    # 无向好友边，默认边权重统一为 1
     edges = [
         (1, 2), (1, 3), (1, 6), (2, 3), (2, 5),
         (3, 4), (3, 6), (4, 7), (4, 8), (5, 7),
@@ -63,9 +65,8 @@ def build_memory_graph_data() -> SocialGraph:
     print("✅ 初始化完成：内存内置测试数据集已加载")
     return g
 
-
 def load_file_graph() -> SocialGraph:
-    """从项目data文件夹读取用户、好友关系文本文件初始化图谱"""
+    """从项目 data 文件夹读取用户、好友关系文本文件初始化图谱"""
     g = SocialGraph()
     user_csv_path = os.path.join(BASE_DIR, "data", "users.csv")
     rel_txt_path = os.path.join(BASE_DIR, "data", "relationships.txt")
@@ -95,7 +96,7 @@ def load_file_graph() -> SocialGraph:
 @pytest.fixture(scope="module")
 def graph() -> SocialGraph:
     """
-    模块级全局图谱夹具：整个测试套件只初始化1次图谱实例
+    模块级全局图谱夹具：整个测试套件只初始化 1 次图谱实例
     测试全部执行完毕后自动清空黑名单，消除测试用例间数据污染
     """
     print_test_title("开始初始化社交图谱全局实例")
@@ -106,79 +107,102 @@ def graph() -> SocialGraph:
 
     yield graph_ins
 
-    # 后置清理钩子
+    # 后置清理钩子：重置黑名单，保证下次运行环境干净
     graph_ins.clear_blacklist()
     print("\n🧹 全局收尾：黑名单已全部清空，测试环境重置完成")
 
 @pytest.fixture(scope="function")
 def empty_graph() -> SocialGraph:
-    """函数级空图谱夹具：每个边界测试用例单独生成空白图，互不干扰"""
+    """函数级空图谱夹具：每个边界测试用例单独生成空白图，用例之间完全隔离互不干扰"""
     return SocialGraph()
 
-# ===================== 测试分组0：自研基础数据结构单元测试（哈希表 + 小顶堆） =====================
+# ===================== 测试分组 0：自研基础数据结构单元测试（哈希表 + 小顶堆） =====================
 class TestSelfDataStructure:
-    """分类：自研底层数据结构单元测试"""
+    """分类：自研底层数据结构单元测试 | 扩充：空哈希表、重复插入、堆相同权重场景"""
     def test_hash_table_all_interface(self):
-        """测试链地址法哈希表：增、查、改、删、包含判断全接口"""
+        """测试链地址法哈希表：增、查、改、删、包含判断、空表、重复键全套接口"""
         ht = HashTable(capacity=20)
+        # 空哈希表校验
+        assert ht.get(1) is None, "空哈希表取值必须返回None"
+        assert 1 not in ht
+
         # 新增键值对
         ht.put(1, {"name": "张三"})
         ht.put(5, {"name": "李四"})
+        ht.put(9, {"name": "王五"})
 
         # 取值校验
         assert ht.get(1)["name"] == "张三", "哈希表取值错误"
-        assert ht.get(INVALID_UID) is None, "不存在key应当返回None"
+        assert ht.get(INVALID_UID) is None, "不存在 key 应当返回 None"
 
-        # key覆盖更新
+        # key 覆盖更新（重复插入同一个键）
         ht.put(1, {"name": "张三三"})
         assert ht.get(1)["name"] == "张三三", "哈希表更新覆盖失效"
 
-        # __contains__ 成员运算符校验
+        # contains 成员运算符校验
         assert 1 in ht
+        assert 5 in ht
         assert INVALID_UID not in ht
 
         # 删除操作
-        assert ht.remove(5) is True, "存在key删除应当返回True"
+        assert ht.remove(5) is True, "存在 key 删除应当返回 True"
         assert ht.get(5) is None
-        assert ht.remove(INVALID_UID) is False, "删除不存在key返回False"
+        assert ht.remove(INVALID_UID) is False, "删除不存在 key 返回 False"
+
+        # 清空所有元素后校验
+        ht.remove(1)
+        ht.remove(9)
+        assert ht.get(1) is None and ht.get(9) is None
+
         print("✅ test_hash_table_all_interface：自研哈希表全部接口校验通过")
 
     def test_min_heap_push_pop_order(self):
-        """测试小顶堆：入堆、堆化上浮下沉、顺序弹出、空堆容错"""
+        """测试小顶堆：入堆、堆化上浮下沉、顺序弹出、空堆、同等权重容错"""
         heap = MinHeap()
-        # 乱序插入(权重, 携带数据)
+        # 空堆校验
+        assert heap.pop() is None
+        assert heap.size() == 0
+
+        # 乱序插入 (权重，携带数据)
         heap.push(5, "C")
         heap.push(2, "A")
         heap.push(7, "D")
         heap.push(1, "B")
+        # 插入相同权重元素
+        heap.push(2, "X")
+        heap.push(2, "Y")
 
         # 严格从小到大弹出最小值
         assert heap.pop() == (1, "B")
         assert heap.pop() == (2, "A")
+        assert heap.pop() == (2, "X")
+        assert heap.pop() == (2, "Y")
         assert heap.pop() == (5, "C")
         assert heap.pop() == (7, "D")
 
-        # 空堆弹出返回None，堆大小归零
+        # 空堆弹出返回 None，堆大小归零
         assert heap.pop() is None
         assert heap.size() == 0
+
         print("✅ test_min_heap_push_pop_order：自研小顶堆出入堆顺序、空值容错正常")
 
-# ===================== 测试分组1：数据加载、基础信息、索引校验 =====================
+# ===================== 测试分组 1：数据加载、基础信息、索引校验 =====================
 class TestGraphBasicLoadInfo:
     """分类：图谱初始化加载、用户信息、邻接表、兴趣反向索引校验"""
     def test_all_users_loaded_correctly(self, graph):
-        """校验10位用户完整导入，无丢失"""
+        """校验 10 位用户完整导入，无丢失、无信息空缺"""
         print_test_title("校验全体用户加载完整性")
         uid_list = list(range(1, MAX_TEST_USER_NUM + 1))
         for uid in uid_list:
             user_info = graph.get_user_info(uid)
-            assert user_info["name"] != "未知用户", f"用户ID:{uid} 加载缺失"
+            assert user_info["name"] != "未知用户", f"用户 ID:{uid} 加载缺失"
+            assert len(user_info["interests"]) > 0, f"用户ID:{uid}兴趣列表为空，数据异常"
         # 兴趣反向索引已构建
         assert len(graph.interest_index) > 0, "兴趣反向索引为空，构建失败"
-        print("✅ test_all_users_loaded_correctly：全部10个用户加载正常，兴趣索引有效")
+        print("✅ test_all_users_loaded_correctly：全部 10 个用户加载正常，兴趣索引有效")
 
     def test_user_detail_attribute(self, graph):
-        """校验用户姓名、兴趣列表字段精准匹配"""
+        """校验用户姓名、兴趣列表字段精准匹配；非法用户返回默认空数据"""
         user1 = graph.get_user_info(1)
         assert user1["name"] == "张三"
         assert set(user1["interests"]) == {"编程", "篮球", "摄影"}
@@ -186,61 +210,86 @@ class TestGraphBasicLoadInfo:
         user10 = graph.get_user_info(10)
         assert user10["name"] == "王十二"
         assert set(user10["interests"]) == {"阅读", "绘画", "篮球"}
+
+        # 查询不存在用户
+        unknown = graph.get_user_info(INVALID_UID)
+        assert unknown["name"] == "未知用户"
+        assert len(unknown["interests"]) == 0
+
         print("✅ test_user_detail_attribute：用户姓名、兴趣信息匹配无误")
 
     def test_direct_friend_adjacent_list(self, graph):
-        """校验一度好友邻接表无向关系数据准确"""
+        """校验一度好友邻接表无向关系数据准确；非法ID好友列表为空"""
         assert set(graph.get_direct_friends(1)) == {2, 3, 6}
         assert set(graph.get_direct_friends(3)) == {1, 2, 4, 6, 8}
         assert set(graph.get_direct_friends(7)) == {4, 5, 6, 8, 10}
+        # 非法用户无好友
+        assert graph.get_direct_friends(INVALID_UID) == []
+
         print("✅ test_direct_friend_adjacent_list：用户直连好友邻接表校验通过")
 
     def test_interest_reverse_index(self, graph):
-        """兴趣反向索引：查询爱好对应的所有用户ID"""
+        """兴趣反向索引：查询爱好对应的所有用户 ID；不存在爱好返回空列表"""
         code_lover = sorted(graph.interest_index["编程"])
         assert code_lover == [1, 3, 6, 9]
 
         travel_lover = sorted(graph.interest_index["旅行"])
         assert travel_lover == [2, 5, 8]
+
+        # 无该爱好返回空
+        assert graph.interest_index.get("滑雪", []) == []
+
         print("✅ test_interest_reverse_index：兴趣反向索引数据正确")
 
-    # ==========新增专项测试1：邻接表专项校验（已适配源码graph.graph）==========
+    # 新增专项测试 1：邻接表专项校验（已适配源码 graph.graph）
     def test_adjacency_list_storage(self, graph):
         adj = graph.graph
-        assert 2 in adj[1]
-        assert 3 in adj[1]
-        assert 6 in adj[1]
-        assert 1 in adj[2]
-        assert 1 in adj[3]
-        assert 999 not in adj
+        # 无向图双向存边校验
+        assert 2 in adj[1] and 1 in adj[2]
+        assert 3 in adj[1] and 1 in adj[3]
+        assert 6 in adj[1] and 1 in adj[6]
+        # 非法节点不在邻接表内
+        assert INVALID_UID not in adj
+
+        # 边权重统一存储校验
         edge_key = tuple(sorted([1, 2]))
         assert graph.edge_weights[edge_key] == 1
+
         print("✅ test_adjacency_list_storage：邻接表双向存边、权重、边界校验全部正常")
 
-# ===================== 测试分组2：用户、好友增删改基础接口 =====================
+# ===================== 测试分组 2：用户、好友增删改基础接口 =====================
 class TestUserFriendOperate:
-    """分类：用户新增删除、好友添加解除、边权重管理"""
+    """分类：用户新增删除、好友添加解除、边权重管理 | 扩充重复操作、删除后反向验证"""
     def test_add_repeat_friend(self, graph):
         """重复添加同一好友，无冗余边，无报错"""
         # 原本已是好友
         assert 2 in graph.get_direct_friends(1)
-        # 重复添加
-        res = graph.add_friendship(1, 2, weight=1)
-        # 可自定义返回规则：已存在好友返回True/False均可，这里校验边不会重复存储
+        # 重复添加多次
+        for _ in range(3):
+            res = graph.add_friendship(1, 2, weight=1)
+        # 边不会重复存储，好友列表仅有一个2
         friend_list = graph.get_direct_friends(1)
         assert friend_list.count(2) == 1
+
         print("✅ test_add_repeat_friend：重复添加好友不会产生冗余边")
 
     def test_modify_edge_weight(self, graph):
-        """修改好友之间边的权重，Dijkstra路径权重同步更新"""
+        """修改好友之间边的权重，Dijkstra 路径权重同步更新"""
+        # 修改1-2边权重为5
         graph.add_friendship(1, 2, weight=5)
         total_w, _ = graph.get_weighted_shortest_path(1, 5)
-        # 路径1-2-5 权重总和 5+1=6
+        # 路径 1-2-5 权重总和 5+1=6
         assert total_w == 6
+
+        # 恢复权重为1，路径变回原值
+        graph.add_friendship(1, 2, weight=1)
+        w_recover, _ = graph.get_weighted_shortest_path(1, 5)
+        assert w_recover == 2
+
         print("✅ test_modify_edge_weight：边权重修改生效，带权路径同步更新")
 
     def test_delete_friendship_bidirectional(self, graph):
-        """双向删除好友关系：双方邻接表、边权重字典同步清除"""
+        """双向删除好友关系：双方邻接表、边权重字典同步清除；重复删除返回false"""
         assert 2 in graph.get_direct_friends(1)
         edge_key = tuple(sorted((1, 2)))
         assert edge_key in graph.edge_weights
@@ -252,23 +301,25 @@ class TestUserFriendOperate:
         assert 1 not in graph.get_direct_friends(2)
         assert edge_key not in graph.edge_weights
 
-        # 重复删除、无效用户删除均返回False
+        # 重复删除、无效用户删除均返回 False
         assert graph.delete_friendship(1, 2) is False
         assert graph.delete_friendship(INVALID_UID, 1) is False
+        assert graph.delete_friendship(NEGATIVE_UID, 2) is False
+
         print("✅ test_delete_friendship_bidirectional：双向好友删除逻辑完整")
 
     def test_delete_user_full_clean(self):
-        """彻底删除用户：好友连线、用户属性、兴趣索引、黑名单全部清理"""
+        """彻底删除用户：好友连线、用户属性、兴趣索引、黑名单全部清理干净"""
         temp_graph = build_memory_graph_data()
-        # 删除用户5
+        # 删除用户 5
         del_success = temp_graph.delete_user(5)
         assert del_success is True
 
-        # 用户哈希表移除
+        # 用户基础信息哈希表移除
         assert temp_graph.user_attrs.get(5) is None
         # 所有好友列表不再包含该用户
         assert 5 not in temp_graph.get_direct_friends(2)
-        # 兴趣索引剔除用户ID
+        # 兴趣索引剔除用户 ID
         assert 5 not in temp_graph.interest_index["旅行"]
 
         # 黑名单绑定用户一并清除
@@ -276,15 +327,17 @@ class TestUserFriendOperate:
         temp_graph.delete_user(5)
         assert not temp_graph.is_in_blacklist(5)
 
-        # 删除不存在用户返回False
+        # 删除不存在用户、负数用户均返回 False
         assert temp_graph.delete_user(INVALID_UID) is False
+        assert temp_graph.delete_user(NEGATIVE_UID) is False
+
         print("✅ test_delete_user_full_clean：用户全维度删除清理完成")
 
-# ===================== 测试分组3：核心算法 + 推荐系统 + 社群分析 =====================
+# ===================== 测试分组 3：核心算法 + 推荐系统 + 社群分析 =====================
 class TestCoreAlgorithmAndRecommend:
-    """分类：最短路径、N度人脉、好友推荐、度中心性、连通社群划分"""
+    """分类：最短路径、N 度人脉、好友推荐、度中心性、连通社群划分"""
     def test_bfs_unweighted_shortest_path(self, graph):
-        """BFS无权图最短路径计算"""
+        """BFS 无权图最短路径计算：可达节点、自身节点、边界全覆盖"""
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == 2
         assert path == [1, 2, 5]
@@ -292,23 +345,25 @@ class TestCoreAlgorithmAndRecommend:
         dist_10, _ = graph.get_shortest_distance(1, 10)
         assert dist_10 == 3
 
-        # 起点终点为同一人，距离0，路径仅自身
+        # 起点终点为同一人，距离 0，路径仅自身
         d_self, p_self = graph.get_shortest_distance(5, 5)
         assert d_self == 0 and p_self == [5]
-        print("✅ test_bfs_unweighted_shortest_path：BFS无权最短路径计算正常")
+
+        print("✅ test_bfs_unweighted_shortest_path：BFS 无权最短路径计算正常")
 
     def test_dijkstra_weighted_shortest_path(self, graph):
-        """Dijkstra算法加权最短路径求解"""
+        """Dijkstra 算法加权最短路径求解"""
         total_weight, path = graph.get_weighted_shortest_path(1, 5)
         assert total_weight == 2
         assert path[0] == 1 and path[-1] == 5
 
         w_self, _ = graph.get_weighted_shortest_path(3, 3)
         assert w_self == 0
-        print("✅ test_dijkstra_weighted_shortest_path：Dijkstra带权路径计算无误")
+
+        print("✅ test_dijkstra_weighted_shortest_path：Dijkstra 带权路径计算无误")
 
     def test_second_degree_friend_with_path(self, graph):
-        """二度人脉查询，携带完整跳转路径"""
+        """二度人脉查询，携带完整跳转路径；校验返回数据格式规范"""
         second_friends = graph.find_second_degree_with_path(1)
         assert len(second_friends) > 0
         for item in second_friends:
@@ -316,10 +371,11 @@ class TestCoreAlgorithmAndRecommend:
             uid, mid_uid, path_arr = item
             assert path_arr[0] == 1
             assert len(path_arr) == 3
+
         print("✅ test_second_degree_friend_with_path：二度人脉查询格式、内容合规")
 
     def test_n_degree_unified_api(self, graph):
-        """通用N度人脉统一接口容错校验"""
+        """通用 N 度人脉统一接口容错校验：正整数、0、负数度数区分处理"""
         # 一度好友
         one_deg = graph.find_n_degree_friends(1, 1)
         assert len(one_deg) == 3
@@ -332,68 +388,77 @@ class TestCoreAlgorithmAndRecommend:
         # 非法度数 <= 0 返回空列表
         assert graph.find_n_degree_friends(1, 0) == []
         assert graph.find_n_degree_friends(1, -3) == []
-        print("✅ test_n_degree_unified_api：N度人脉通用接口运行正常")
+
+        print("✅ test_n_degree_unified_api：N 度人脉通用接口运行正常")
 
     def test_interest_based_recommend_sort(self, graph):
-        """基于兴趣相似度好友推荐：按共同兴趣数量降序排列"""
+        """基于兴趣相似度好友推荐：按共同兴趣数量降序排列；排除自身与现有好友"""
         rec_list = graph.recommend_friends_by_interest(1, top_n=3)
         assert len(rec_list) <= 3
         score_prev = 999
         for uid, name, score, inter_list in rec_list:
             # 过滤自己和现有好友
-            assert uid not in {1, 2, 3, 6}
+            assert uid not in {1, 2, 3, 6}, "推荐列表不能出现自身和已添加好友"
             assert score == len(inter_list)
-            # 推荐结果降序排序
+            # 推荐结果严格降序排序
             assert score <= score_prev
             score_prev = score
+
         print("✅ test_interest_based_recommend_sort：兴趣推荐规则、降序排序校验通过")
 
-    # ==========新增专项测试2：哈希表专项校验==========
+    # 新增专项测试 2：哈希表专项校验
     def test_hash_table_interest_index(self, graph):
-        # 测试兴趣反向索引哈希表存取、新增、删除逻辑
+        """测试兴趣反向索引哈希表存取、新增、删除逻辑"""
         hash_index = graph.interest_index
         assert isinstance(hash_index, dict)
-        assert sorted(hash_index["音乐"]) == [2,5,9]
+        assert sorted(hash_index["音乐"]) == [2, 5, 9]
+
+        # 新增用户自动写入兴趣哈希索引
         graph.add_user(11, "测试", ["徒步", "编程"])
         assert 11 in hash_index["编程"]
+        # 不存在爱好默认返回空列表
         assert hash_index.get("滑雪", []) == []
+
         print("✅ test_hash_table_interest_index：兴趣哈希表增、查、缺省逻辑校验通过")
 
-    # ==========新增专项测试3：堆专项校验==========
+    # 新增专项测试 3：堆专项校验
     def test_heap_recommend_topk(self, graph):
-        # 测试推荐功能底层小根堆TopK排序逻辑
+        """测试推荐功能底层小根堆 TopK 排序逻辑：降序输出、数量限制生效"""
         rec_result = graph.recommend_friends_by_interest(1, top_n=4)
         scores = [item[2] for item in rec_result]
         sorted_score = sorted(scores, reverse=True)
         assert scores == sorted_score
         assert len(rec_result) <= 4
-        print("✅ test_heap_recommend_topk：堆实现TopK推荐降序排序、数量限制有效")
+
+        print("✅ test_heap_recommend_topk：堆实现 TopK 推荐降序排序、数量限制有效")
 
     def test_mix_weight_recommend(self, graph):
-        """兴趣+社交亲密度混合加权推荐"""
+        """兴趣 + 社交亲密度混合加权推荐"""
         mix_rec = graph.recommend_friends_weight_mix(1, top_n=4)
         assert len(mix_rec) <= 4
         for uid, name, score, inters in mix_rec:
             assert isinstance(score, float)
             assert uid not in {1, 2, 3, 6}
+
         print("✅ test_mix_weight_recommend：混合加权推荐正常返回")
 
     def test_degree_centrality_desc_sort(self, graph):
-        """度中心性计算，好友数量降序排序"""
+        """度中心性计算，好友数量降序排序；校验最大节点度数"""
         rank_result = graph.calc_degree_centrality()
         assert len(rank_result) == 10
         prev_num = 999
         for _, friend_cnt, _ in rank_result:
             assert friend_cnt <= prev_num
             prev_num = friend_cnt
-        # 好友最多用户为3号、7号，均为5个好友
+        # 好友最多用户为 3 号、7 号，均为 5 个好友
         top_counts = [item[1] for item in rank_result[:2]]
         assert 5 in top_counts
+
         print("✅ test_degree_centrality_desc_sort：节点度值降序排序正确")
 
     def test_connected_component_community(self, graph, empty_graph):
         """连通分量社群划分：完整大图单社群；空图无社群；单点用户独立社群"""
-        # 完整整张图连通，仅1个社群
+        # 完整整张图连通，仅 1 个社群
         communities = graph.find_all_communities()
         assert len(communities) == 1
         assert sorted(communities[0]) == list(range(1, 11))
@@ -401,18 +466,19 @@ class TestCoreAlgorithmAndRecommend:
         # 空图谱社群为空
         assert empty_graph.find_all_communities() == []
 
-        # 单个用户自成社群
+        # 单个用户自成独立社群
         empty_graph.add_user(100, "测试用户", [])
         single_comm = empty_graph.find_all_communities()
         assert len(single_comm) == 1
         assert single_comm[0] == [100]
+
         print("✅ test_connected_component_community：连通社群划分逻辑正常")
 
-# ===================== 测试分组4：边界异常输入 + 黑名单全链路拦截测试 =====================
+# ===================== 测试分组 4：边界异常输入 + 黑名单全链路拦截测试 =====================
 class TestBoundaryExceptionBlacklist:
-    """分类：非法参数容错、黑名单增删查改+全算法拦截校验"""
+    """分类：非法参数容错、黑名单增删查改 + 全算法拦截校验 | 大幅扩充场景"""
     def test_abnormal_input_fault_tolerant(self, graph, empty_graph):
-        """各类非法入参异常捕获与容错"""
+        """各类非法入参异常捕获与容错，空图谱运行所有算法无崩溃"""
         # 不存在用户信息查询返回默认未知用户
         unknown_user = graph.get_user_info(INVALID_UID)
         assert unknown_user["name"] == "未知用户"
@@ -420,90 +486,89 @@ class TestBoundaryExceptionBlacklist:
 
         # 无效用户好友列表为空
         assert graph.get_direct_friends(INVALID_UID) == []
+        assert graph.get_direct_friends(NEGATIVE_UID) == []
 
         # 推荐数量超出总用户数，返回全部候选
-        all_rec = graph.recommend_friends_by_interest(1, top_n=200)
+        all_rec = graph.recommend_friends_by_interest(1, top_n=TOP_N_OVER_MAX)
         assert isinstance(all_rec, list)
 
-        # 自己不能添加自己为好友，抛出ValueError
+        # 自己不能添加自己为好友，抛出 ValueError
         with pytest.raises(ValueError):
             graph.add_friendship(SELF_UID_ERR, SELF_UID_ERR)
 
-        # 负ID创建用户非法
+        # 负 ID 创建用户非法，抛出异常
         with pytest.raises(ValueError):
-            graph.add_user(-10, "负数ID", ["追剧"])
+            graph.add_user(NEGATIVE_UID, "负数 ID", ["追剧"])
 
-        # 空图谱运行所有算法不崩溃
+        # 空图谱执行全部算法，不会报错崩溃
         empty_graph.get_shortest_distance(1, 2)
         empty_graph.calc_degree_centrality()
         empty_graph.recommend_friends_by_interest(1, 5)
+        empty_graph.find_all_communities()
+
         print("✅ test_abnormal_input_fault_tolerant：各类异常参数容错无崩溃")
 
     def test_blacklist_full_intercept_all_func(self, graph):
-        """黑名单完整场景：添加、移除、清空；所有算法均拦截黑名单用户"""
-        # 1. 拉黑不存在用户返回False
+        """黑名单完整场景：添加、移除、清空；所有算法均拦截黑名单用户，移除后恢复连通"""
+        # 1. 拉黑不存在用户返回 False
         assert graph.add_to_blacklist(INVALID_UID) is False
-
-        # 2. 正常拉黑有效用户5
+        # 2. 正常拉黑有效用户 5，重复拉黑依旧生效
         assert graph.add_to_blacklist(5) is True
         assert graph.is_in_blacklist(5) is True
-        # 重复添加黑名单允许，返回True
         assert graph.add_to_blacklist(5) is True
-
         # 3. 好友列表自动屏蔽黑名单用户
         assert 5 not in graph.get_direct_friends(2)
-
-        # 4. BFS最短路径无法抵达黑名单节点，距离返回-1
+        # 4. BFS 最短路径无法抵达黑名单节点，距离返回 -1
         dist_bfs, _ = graph.get_shortest_distance(1, 5)
         assert dist_bfs == -1
-
-        # 5. Dijkstra加权路径同样不可达
+        # 5. Dijkstra 加权路径同样不可达
         dist_dijk, _ = graph.get_weighted_shortest_path(1, 5)
         assert dist_dijk == -1
-
-        # 6. 二度人脉、N度人脉全部过滤黑名单人员
+        # 6. 二度人脉、N 度人脉全部过滤黑名单人员
         second_uid_list = [item[0] for item in graph.find_second_degree_with_path(1)]
         assert 5 not in second_uid_list
         n2_friends = graph.find_n_degree_friends(1, 2)
         assert 5 not in n2_friends
-
         # 7. 推荐好友结果不会出现黑名单用户
         rec_data = graph.recommend_friends_by_interest(1, top_n=5)
         rec_uids = [item[0] for item in rec_data]
         assert 5 not in rec_uids
-
-        # 8. 移出黑名单恢复访问
+        # 8. 移出黑名单恢复所有访问权限
         assert graph.remove_from_blacklist(5) is True
         assert graph.is_in_blacklist(5) is False
         assert graph.remove_from_blacklist(5) is False
-
         dist_recover, _ = graph.get_shortest_distance(1, 5)
         assert dist_recover == 2
-
         # 9. 批量拉黑后一键清空黑名单
         graph.add_to_blacklist(3)
         graph.add_to_blacklist(7)
         graph.clear_blacklist()
         assert len(graph.blacklist) == 0
+
         print("✅ test_blacklist_full_intercept_all_func：黑名单全功能拦截、恢复校验全部通过")
 
-# ==========新增专项测试4：文件读取解析专项测试（独立用例，单独成类）==========
+# 新增专项测试 4：文件读取解析专项测试（独立用例，单独成类）
 class TestFileLoadParse:
     def test_file_parse_accuracy(self):
-        # 独立读取文件，校验csv、txt解析内容和内存数据完全一致
+        """独立读取文件，校验 csv、txt 解析内容和内存数据完全一致"""
         BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         user_csv_path = os.path.join(BASE, "data", "users.csv")
         rel_txt_path = os.path.join(BASE, "data", "relationships.txt")
+
         file_g = SocialGraph()
         file_g.load_users_from_csv(user_csv_path)
         file_g.load_relationships_from_txt(rel_txt_path)
 
         memory_g = build_memory_graph_data()
-        for uid in range(1,11):
+        # 逐用户比对个人信息
+        for uid in range(1, 11):
             file_info = file_g.get_user_info(uid)
             mem_info = memory_g.get_user_info(uid)
             assert file_info["name"] == mem_info["name"]
             assert set(file_info["interests"]) == set(mem_info["interests"])
-        for uid in range(1,11):
+
+        # 逐用户比对好友邻接关系
+        for uid in range(1, 11):
             assert set(file_g.get_direct_friends(uid)) == set(memory_g.get_direct_friends(uid))
-        print("✅ test_file_parse_accuracy：users.csv、relationships.txt文件解析和内存数据完全匹配")
+
+        print("✅ test_file_parse_accuracy：users.csv、relationships.txt 文件解析和内存数据完全匹配")
