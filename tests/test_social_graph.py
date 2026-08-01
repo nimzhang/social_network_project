@@ -65,3 +65,53 @@ def build_memory_graph_data() -> SocialGraph:
 
     print("✅ 初始化完成：内存内置测试数据集已加载")
     return g
+
+def load_file_graph() -> SocialGraph:
+    """从项目 data 文件夹读取用户、好友关系文本文件初始化图谱"""
+    g = SocialGraph()
+    user_csv_path = os.path.join(BASE_DIR, "data", "users.csv")
+    rel_txt_path = os.path.join(BASE_DIR, "data", "relationships.txt")
+    print(f"\n📂 用户数据文件：{user_csv_path}")
+    print(f"📂 好友关系文件：{rel_txt_path}")
+
+    # 文件存在性校验
+    if not os.path.exists(user_csv_path):
+        raise FileNotFoundError(f"用户文件缺失：{user_csv_path}")
+    if not os.path.exists(rel_txt_path):
+        raise FileNotFoundError(f"好友关系文件缺失：{rel_txt_path}")
+
+    # 加载数据并校验返回状态
+    load_user_success = g.load_users_from_csv(user_csv_path)
+    load_rel_success = g.load_relationships_from_txt(rel_txt_path)
+    if not load_user_success:
+        raise RuntimeError("users.csv 解析加载失败，请检查文件格式、编码、字段排列")
+    if not load_rel_success:
+        raise RuntimeError("relationships.txt 解析加载失败，请检查每行边数据格式")
+
+    print("✅ 初始化完成：外部磁盘数据文件加载完毕")
+    return g
+
+# ===================== pytest 夹具配置 =====================
+# 修改：scope改为function，每个用例单独全新构建图谱，彻底隔离数据污染
+@pytest.fixture(scope="function")
+def graph() -> SocialGraph:
+    """
+    函数级图谱夹具：每一条测试用例都会重新初始化全新图谱
+    用例执行完毕后清空黑名单，保证每条用例环境干净独立
+    """
+    print_test_title("开始初始化社交图谱全局实例")
+    if USE_DATA_FILE:
+        graph_ins = load_file_graph()
+    else:
+        graph_ins = build_memory_graph_data()
+    yield graph_ins
+    # 后置清理钩子：重置黑名单
+    graph_ins.clear_blacklist()
+    print("\n🧹 全局收尾：黑名单已全部清空，测试环境重置完成")
+
+@pytest.fixture(scope="function")
+def empty_graph() -> SocialGraph:
+    """函数级空图谱夹具：每个边界测试用例单独生成空白图，用例之间完全隔离互不干扰"""
+    return SocialGraph()
+
+
