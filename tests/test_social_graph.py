@@ -141,6 +141,7 @@ class TestSelfDataStructure:
         assert ht.remove(5) is True, "存在key删除应当返回True"
         assert ht.get(5) is None
         assert ht.remove(INVALID_UID) is False, "删除不存在key返回False"
+        print("✅ test_hash_table_all_interface：自研哈希表全部接口校验通过")
 
     def test_min_heap_push_pop_order(self):
         """测试小顶堆：入堆、堆化上浮下沉、顺序弹出、空堆容错"""
@@ -160,6 +161,7 @@ class TestSelfDataStructure:
         # 空堆弹出返回None，堆大小归零
         assert heap.pop() is None
         assert heap.size() == 0
+        print("✅ test_min_heap_push_pop_order：自研小顶堆出入堆顺序、空值容错正常")
 
 # ===================== 测试分组1：数据加载、基础信息、索引校验 =====================
 class TestGraphBasicLoadInfo:
@@ -173,6 +175,7 @@ class TestGraphBasicLoadInfo:
             assert user_info["name"] != "未知用户", f"用户ID:{uid} 加载缺失"
         # 兴趣反向索引已构建
         assert len(graph.interest_index) > 0, "兴趣反向索引为空，构建失败"
+        print("✅ test_all_users_loaded_correctly：全部10个用户加载正常，兴趣索引有效")
 
     def test_user_detail_attribute(self, graph):
         """校验用户姓名、兴趣列表字段精准匹配"""
@@ -183,12 +186,14 @@ class TestGraphBasicLoadInfo:
         user10 = graph.get_user_info(10)
         assert user10["name"] == "王十二"
         assert set(user10["interests"]) == {"阅读", "绘画", "篮球"}
+        print("✅ test_user_detail_attribute：用户姓名、兴趣信息匹配无误")
 
     def test_direct_friend_adjacent_list(self, graph):
         """校验一度好友邻接表无向关系数据准确"""
         assert set(graph.get_direct_friends(1)) == {2, 3, 6}
         assert set(graph.get_direct_friends(3)) == {1, 2, 4, 6, 8}
         assert set(graph.get_direct_friends(7)) == {4, 5, 6, 8, 10}
+        print("✅ test_direct_friend_adjacent_list：用户直连好友邻接表校验通过")
 
     def test_interest_reverse_index(self, graph):
         """兴趣反向索引：查询爱好对应的所有用户ID"""
@@ -197,6 +202,20 @@ class TestGraphBasicLoadInfo:
 
         travel_lover = sorted(graph.interest_index["旅行"])
         assert travel_lover == [2, 5, 8]
+        print("✅ test_interest_reverse_index：兴趣反向索引数据正确")
+
+    # ==========新增专项测试1：邻接表专项校验==========
+    def test_adjacency_list_storage(self, graph):
+        adj = graph.graph
+        assert 2 in adj[1]
+        assert 3 in adj[1]
+        assert 6 in adj[1]
+        assert 1 in adj[2]
+        assert 1 in adj[3]
+        assert 999 not in adj
+        edge_key = tuple(sorted([1, 2]))
+        assert graph.edge_weights[edge_key] == 1
+        print("✅ test_adjacency_list_storage：邻接表双向存边、权重、边界校验全部正常")
 
 # ===================== 测试分组2：用户、好友增删改基础接口 =====================
 class TestUserFriendOperate:
@@ -210,6 +229,7 @@ class TestUserFriendOperate:
         # 可自定义返回规则：已存在好友返回True/False均可，这里校验边不会重复存储
         friend_list = graph.get_direct_friends(1)
         assert friend_list.count(2) == 1
+        print("✅ test_add_repeat_friend：重复添加好友不会产生冗余边")
 
     def test_modify_edge_weight(self, graph):
         """修改好友之间边的权重，Dijkstra路径权重同步更新"""
@@ -217,6 +237,7 @@ class TestUserFriendOperate:
         total_w, _ = graph.get_weighted_shortest_path(1, 5)
         # 路径1-2-5 权重总和 5+1=6
         assert total_w == 6
+        print("✅ test_modify_edge_weight：边权重修改生效，带权路径同步更新")
 
     def test_delete_friendship_bidirectional(self, graph):
         """双向删除好友关系：双方邻接表、边权重字典同步清除"""
@@ -234,6 +255,7 @@ class TestUserFriendOperate:
         # 重复删除、无效用户删除均返回False
         assert graph.delete_friendship(1, 2) is False
         assert graph.delete_friendship(INVALID_UID, 1) is False
+        print("✅ test_delete_friendship_bidirectional：双向好友删除逻辑完整")
 
     def test_delete_user_full_clean(self):
         """彻底删除用户：好友连线、用户属性、兴趣索引、黑名单全部清理"""
@@ -256,6 +278,7 @@ class TestUserFriendOperate:
 
         # 删除不存在用户返回False
         assert temp_graph.delete_user(INVALID_UID) is False
+        print("✅ test_delete_user_full_clean：用户全维度删除清理完成")
 
 # ===================== 测试分组3：核心算法 + 推荐系统 + 社群分析 =====================
 class TestCoreAlgorithmAndRecommend:
@@ -272,6 +295,7 @@ class TestCoreAlgorithmAndRecommend:
         # 起点终点为同一人，距离0，路径仅自身
         d_self, p_self = graph.get_shortest_distance(5, 5)
         assert d_self == 0 and p_self == [5]
+        print("✅ test_bfs_unweighted_shortest_path：BFS无权最短路径计算正常")
 
     def test_dijkstra_weighted_shortest_path(self, graph):
         """Dijkstra算法加权最短路径求解"""
@@ -281,6 +305,7 @@ class TestCoreAlgorithmAndRecommend:
 
         w_self, _ = graph.get_weighted_shortest_path(3, 3)
         assert w_self == 0
+        print("✅ test_dijkstra_weighted_shortest_path：Dijkstra带权路径计算无误")
 
     def test_second_degree_friend_with_path(self, graph):
         """二度人脉查询，携带完整跳转路径"""
@@ -291,21 +316,23 @@ class TestCoreAlgorithmAndRecommend:
             uid, mid_uid, path_arr = item
             assert path_arr[0] == 1
             assert len(path_arr) == 3
+        print("✅ test_second_degree_friend_with_path：二度人脉查询格式、内容合规")
 
     def test_n_degree_unified_api(self, graph):
         """通用N度人脉统一接口容错校验"""
         # 一度好友
-        one_deg = graph.find_n_degree_friends(1, degree=1)
+        one_deg = graph.find_n_degree_friends(1, 1)
         assert len(one_deg) == 3
         assert set(one_deg) == {2, 3, 6}
 
         # 二度好友
-        two_deg = graph.find_n_degree_friends(1, degree=2)
+        two_deg = graph.find_n_degree_friends(1, 2)
         assert len(two_deg) > 0
 
         # 非法度数 <= 0 返回空列表
         assert graph.find_n_degree_friends(1, 0) == []
         assert graph.find_n_degree_friends(1, -3) == []
+        print("✅ test_n_degree_unified_api：N度人脉通用接口运行正常")
 
     def test_interest_based_recommend_sort(self, graph):
         """基于兴趣相似度好友推荐：按共同兴趣数量降序排列"""
@@ -319,6 +346,28 @@ class TestCoreAlgorithmAndRecommend:
             # 推荐结果降序排序
             assert score <= score_prev
             score_prev = score
+        print("✅ test_interest_based_recommend_sort：兴趣推荐规则、降序排序校验通过")
+
+    # ==========新增专项测试2：哈希表专项校验==========
+    def test_hash_table_interest_index(self, graph):
+        # 测试兴趣反向索引哈希表存取、新增、删除逻辑
+        hash_index = graph.interest_index
+        assert isinstance(hash_index, dict)
+        assert sorted(hash_index["音乐"]) == [2,5,9]
+        graph.add_user(11, "测试", ["徒步", "编程"])
+        assert 11 in hash_index["编程"]
+        assert hash_index.get("滑雪", []) == []
+        print("✅ test_hash_table_interest_index：兴趣哈希表增、查、缺省逻辑校验通过")
+
+    # ==========新增专项测试3：堆专项校验==========
+    def test_heap_recommend_topk(self, graph):
+        # 测试推荐功能底层小根堆TopK排序逻辑
+        rec_result = graph.recommend_friends_by_interest(1, top_n=4)
+        scores = [item[2] for item in rec_result]
+        sorted_score = sorted(scores, reverse=True)
+        assert scores == sorted_score
+        assert len(rec_result) <= 4
+        print("✅ test_heap_recommend_topk：堆实现TopK推荐降序排序、数量限制有效")
 
     def test_mix_weight_recommend(self, graph):
         """兴趣+社交亲密度混合加权推荐"""
@@ -327,6 +376,7 @@ class TestCoreAlgorithmAndRecommend:
         for uid, name, score, inters in mix_rec:
             assert isinstance(score, float)
             assert uid not in {1, 2, 3, 6}
+        print("✅ test_mix_weight_recommend：混合加权推荐正常返回")
 
     def test_degree_centrality_desc_sort(self, graph):
         """度中心性计算，好友数量降序排序"""
@@ -339,6 +389,7 @@ class TestCoreAlgorithmAndRecommend:
         # 好友最多用户为3号、7号，均为5个好友
         top_counts = [item[1] for item in rank_result[:2]]
         assert 5 in top_counts
+        print("✅ test_degree_centrality_desc_sort：节点度值降序排序正确")
 
     def test_connected_component_community(self, graph, empty_graph):
         """连通分量社群划分：完整大图单社群；空图无社群；单点用户独立社群"""
@@ -355,6 +406,7 @@ class TestCoreAlgorithmAndRecommend:
         single_comm = empty_graph.find_all_communities()
         assert len(single_comm) == 1
         assert single_comm[0] == [100]
+        print("✅ test_connected_component_community：连通社群划分逻辑正常")
 
 # ===================== 测试分组4：边界异常输入 + 黑名单全链路拦截测试 =====================
 class TestBoundaryExceptionBlacklist:
@@ -385,6 +437,7 @@ class TestBoundaryExceptionBlacklist:
         empty_graph.get_shortest_distance(1, 2)
         empty_graph.calc_degree_centrality()
         empty_graph.recommend_friends_by_interest(1, 5)
+        print("✅ test_abnormal_input_fault_tolerant：各类异常参数容错无崩溃")
 
     def test_blacklist_full_intercept_all_func(self, graph):
         """黑名单完整场景：添加、移除、清空；所有算法均拦截黑名单用户"""
@@ -432,3 +485,25 @@ class TestBoundaryExceptionBlacklist:
         graph.add_to_blacklist(7)
         graph.clear_blacklist()
         assert len(graph.blacklist) == 0
+        print("✅ test_blacklist_full_intercept_all_func：黑名单全功能拦截、恢复校验全部通过")
+
+# ==========新增专项测试4：文件读取解析专项测试（独立用例，单独成类）==========
+class TestFileLoadParse:
+    def test_file_parse_accuracy(self):
+        # 独立读取文件，校验csv、txt解析内容和内存数据完全一致
+        BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        user_csv_path = os.path.join(BASE, "data", "users.csv")
+        rel_txt_path = os.path.join(BASE, "data", "relationships.txt")
+        file_g = SocialGraph()
+        file_g.load_users_from_csv(user_csv_path)
+        file_g.load_relationships_from_txt(rel_txt_path)
+
+        memory_g = build_memory_graph_data()
+        for uid in range(1,11):
+            file_info = file_g.get_user_info(uid)
+            mem_info = memory_g.get_user_info(uid)
+            assert file_info["name"] == mem_info["name"]
+            assert set(file_info["interests"]) == set(mem_info["interests"])
+        for uid in range(1,11):
+            assert set(file_g.get_direct_friends(uid)) == set(memory_g.get_direct_friends(uid))
+        print("✅ test_file_parse_accuracy：users.csv、relationships.txt文件解析和内存数据完全匹配")
