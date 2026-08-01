@@ -116,7 +116,7 @@ def empty_graph() -> SocialGraph:
 
 
 # ==============================================================
-# ===================== 【第一大部分：数据结构负责全量代码】 =====================
+# ===================== 【第一大部分：数据结构部分】 =====================
 # 覆盖：自研HashTable/MinHeap单元测试、邻接表底层、兴趣索引、文件IO全部测试用例
 # ==============================================================
 
@@ -250,7 +250,7 @@ class TestGraphBasicLoadInfo:
         assert graph.edge_weights[edge_key] == 1
         print("✅ test_adjacency_list_storage：邻接表双向存边、权重、边界校验全部正常")
 
-# 新增专项测试 4：文件读取解析专项测试（文件IO模块测试）
+# 新增专项测试 2：文件读取解析专项测试（文件IO模块测试）
 class TestFileLoadParse:
     def test_file_parse_accuracy(self):
         """独立读取文件，校验 csv、txt 解析内容和内存数据完全一致"""
@@ -271,7 +271,6 @@ class TestFileLoadParse:
         for uid in range(1, 11):
             assert set(file_g.get_direct_friends(uid)) == set(memory_g.get_direct_friends(uid))
         print("✅ test_file_parse_accuracy：users.csv、relationships.txt 文件解析和内存数据完全匹配")
-
 
 # ==============================================================
 # ===================== 【第二大部分：算法同学负责全量代码】 =====================
