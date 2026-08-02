@@ -937,97 +937,76 @@ class SocialGraph:
         print(f"5. 全网人脉层级计算(可视化用)耗时: {t5:.4f} s")
         print("========================================\n")
 
-        # ========================【算法代码结束】========================  ← 这一行之前的代码
 
-        # ========================【新增功能3：数据导出】========================
 
-    def export_relationships_to_csv(self, filename: str) -> bool:
+    # ========================【新增功能3：数据导出（详细邻接表含路径）】========================
+    # ========================【新增功能3：数据导出（展开版邻接表）】========================
+    def export_adjacency_list_expanded(self, filename: str) -> bool:
         """
-        导出全部好友关系到CSV文件
-        格式：用户ID1,用户ID2,权重
-        返回True表示导出成功，False表示失败
-        """
-        try:
-            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
-
-            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["用户ID1", "用户ID2", "权重"])
-
-                for (u1, u2), weight in self.edge_weights.items():
-                    writer.writerow([u1, u2, weight])
-
-            print(f"✅ 好友关系导出成功：{filename}，共导出 {self.edge_weights.size} 条关系")
-            return True
-        except Exception as e:
-            print(f"❌ 导出好友关系失败：{e}")
-            return False
-
-    def export_users_to_csv(self, filename: str) -> bool:
-        """
-        导出全部用户数据到CSV文件
-        格式：用户ID,姓名,兴趣标签（分号分隔）
-        返回True表示导出成功，False表示失败
+        导出展开版邻接表（每行一条关系）
+        格式：用户ID,姓名,兴趣标签,好友ID,好友姓名,二度人脉ID,二度人脉姓名,路径
+        例如：
+            1,张三,编程;篮球;摄影,2,李四,5,钱七,1→2→5
+            1,张三,编程;篮球;摄影,2,李四,9,郑十一,1→2→9
         """
         try:
             os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
 
-            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["用户ID", "姓名", "兴趣标签"])
+            with open(filename, "w", encoding="utf-8-sig") as f:
+                # 写入表头
+                f.write("用户ID,姓名,兴趣标签,好友ID,好友姓名,二度人脉ID,二度人脉姓名,路径\n")
 
                 for uid in self.user_attrs.keys():
+                    if uid in self.blacklist:
+                        continue
+
+                    # 获取用户信息
                     info = self.user_attrs.get(uid)
-                    if info:
-                        interests_str = ";".join(info.get("interests", []))
-                        writer.writerow([uid, info.get("name", ""), interests_str])
+                    name = info.get("name", "未知") if info else "未知"
+                    interests = ";".join(info.get("interests", [])) if info else ""
 
-            print(f"✅ 用户数据导出成功：{filename}，共导出 {self.user_attrs.size} 个用户")
+                    # 获取好友列表（含姓名）
+                    friends = self.get_direct_friends(uid)
+
+                    # 获取二度人脉（含路径）
+                    second_degree = self.find_second_degree_with_path(uid, sort_strategy="weight")
+
+                    if not friends:
+                        # 没有好友，输出一行空数据
+                        f.write(f"{uid},{name},{interests},无,无,无,无,无\n")
+                        continue
+
+                    if not second_degree:
+                        # 有好友但没有二度人脉
+                        for fid in friends:
+                            finfo = self.user_attrs.get(fid)
+                            fname = finfo.get("name", "未知") if finfo else "未知"
+                            f.write(f"{uid},{name},{interests},{fid},{fname},无,无,无\n")
+                        continue
+
+                    # 有好友也有二度人脉，展开每条关系
+                    for fid in friends:
+                        finfo = self.user_attrs.get(fid)
+                        fname = finfo.get("name", "未知") if finfo else "未知"
+
+                        # 找到通过这个好友到达的二度人脉
+                        related_second = [s for s in second_degree if s[1] == fid]
+
+                        if related_second:
+                            for sec_uid, mid_uid, path in related_second:
+                                sec_info = self.user_attrs.get(sec_uid)
+                                sec_name = sec_info.get("name", "未知") if sec_info else "未知"
+                                path_str = "→".join(str(p) for p in path)
+                                f.write(f"{uid},{name},{interests},{fid},{fname},{sec_uid},{sec_name},{path_str}\n")
+                        else:
+                            # 好友没有对应的二度人脉
+                            f.write(f"{uid},{name},{interests},{fid},{fname},无,无,无\n")
+
+            print(f"✅ 展开版邻接表导出成功：{filename}")
             return True
         except Exception as e:
-            print(f"❌ 导出用户数据失败：{e}")
+            print(f"❌ 导出展开版邻接表失败：{e}")
             return False
-
-    def export_second_degree_to_csv(self, user_id: int, filename: str, sort_strategy: str = "weight") -> bool:
-        """
-        导出指定用户的二度人脉到CSV文件
-        格式：二度用户ID,二度用户姓名,二度用户兴趣,中间人ID,中间人姓名,路径
-        """
-        try:
-            if self.user_attrs.get(user_id) is None:
-                print(f"❌ 用户 {user_id} 不存在，无法导出二度人脉")
-                return False
-
-            second_degree_list = self.find_second_degree_with_path(user_id, sort_strategy)
-
-            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
-
-            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["二度用户ID", "二度用户姓名", "二度用户兴趣", "中间人ID", "中间人姓名", "路径"])
-
-                if not second_degree_list:
-                    print(f"⚠️ 用户 {user_id} 没有二度人脉可导出")
-                    return True
-
-                for sec_uid, mid_uid, path in second_degree_list:
-                    sec_info = self.user_attrs.get(sec_uid)
-                    mid_info = self.user_attrs.get(mid_uid)
-
-                    sec_name = sec_info.get("name", "未知") if sec_info else "未知"
-                    sec_interests = ";".join(sec_info.get("interests", [])) if sec_info else ""
-                    mid_name = mid_info.get("name", "未知") if mid_info else "未知"
-
-                    path_str = "→".join(str(p) for p in path)
-                    writer.writerow([sec_uid, sec_name, sec_interests, mid_uid, mid_name, path_str])
-
-            print(f"✅ 二度人脉导出成功：{filename}，共导出 {len(second_degree_list)} 条二度人脉")
-            return True
-        except Exception as e:
-            print(f"❌ 导出二度人脉失败：{e}")
-            return False
-
-    # ========================【算法代码结束】========================  ← 这一行在这三个方法之后
 # ========================【算法代码结束】========================
 
 # 1. 定义顶层main函数

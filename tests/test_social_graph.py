@@ -436,197 +436,34 @@ class TestCoreAlgorithmAndRecommend:
 
 # ===================== 【全新新增测试分组：数据导出功能测试】 =====================
 class TestDataExportFeature:
-    """测试功能3：数据导出功能（CSV格式导出）"""
+    """测试功能3：数据导出（展开版邻接表）"""
 
-    def test_export_relationships_to_csv(self, graph, tmp_path):
-        """测试导出好友关系到CSV文件"""
-        print_test_title("测试导出好友关系CSV")
+    def test_export_adjacency_list_expanded(self, graph, tmp_path):
+        """测试导出展开版邻接表（每行一条关系）"""
+        print_test_title("测试展开版邻接表导出")
 
-        # 使用临时目录确保测试不污染项目文件
-        output_file = tmp_path / "test_export_relationships.csv"
+        output_file = tmp_path / "export_adj_expanded.csv"
 
-        # 执行导出
-        result = graph.export_relationships_to_csv(str(output_file))
+        result = graph.export_adjacency_list_expanded(str(output_file))
         assert result is True
 
-        # 验证文件存在且非空
         assert output_file.exists()
-        assert output_file.stat().st_size > 0
 
-        # 读取CSV验证内容
-        import csv
         with open(output_file, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+            content = f.read()
+            print(f"\n📄 展开版邻接表内容:\n{content}")
 
             # 验证表头
-            assert reader.fieldnames == ["用户ID1", "用户ID2", "权重"]
+            assert "用户ID" in content
+            assert "姓名" in content
+            assert "好友ID" in content
+            assert "二度人脉ID" in content
+            assert "路径" in content
 
-            # 验证数据行数量与edge_weights一致
-            assert len(rows) == graph.edge_weights.size
+            # 验证数据
+            assert "张三" in content
+            assert "李四" in content
+            assert "钱七" in content
+            assert "→" in content
 
-            # 验证至少有一条数据
-            assert len(rows) > 0
-
-            # 验证数据格式正确
-            for row in rows:
-                assert int(row["用户ID1"]) > 0
-                assert int(row["用户ID2"]) > 0
-                assert int(row["权重"]) >= 1
-
-        print(f"✅ test_export_relationships_to_csv：成功导出 {len(rows)} 条好友关系")
-
-    def test_export_users_to_csv(self, graph, tmp_path):
-        """测试导出用户数据到CSV文件"""
-        print_test_title("测试导出用户数据CSV")
-
-        output_file = tmp_path / "test_export_users.csv"
-
-        result = graph.export_users_to_csv(str(output_file))
-        assert result is True
-
-        assert output_file.exists()
-        assert output_file.stat().st_size > 0
-
-        import csv
-        with open(output_file, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-
-            assert reader.fieldnames == ["用户ID", "姓名", "兴趣标签"]
-
-            # 验证用户数量
-            assert len(rows) == graph.user_attrs.size
-            assert len(rows) == 10  # 内存数据集有10个用户
-
-            # 验证具体用户数据
-            user1 = next(row for row in rows if int(row["用户ID"]) == 1)
-            assert user1["姓名"] == "张三"
-            assert "编程" in user1["兴趣标签"]
-            assert "篮球" in user1["兴趣标签"]
-
-        print(f"✅ test_export_users_to_csv：成功导出 {len(rows)} 个用户")
-
-    def test_export_second_degree_to_csv_weight_sort(self, graph, tmp_path):
-        """测试导出二度人脉CSV - 权重排序策略"""
-        print_test_title("测试导出二度人脉CSV（权重排序）")
-
-        output_file = tmp_path / "test_export_second_degree_weight.csv"
-
-        result = graph.export_second_degree_to_csv(1, str(output_file), sort_strategy="weight")
-        assert result is True
-
-        assert output_file.exists()
-
-        import csv
-        with open(output_file, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-
-            assert reader.fieldnames == ["二度用户ID", "二度用户姓名", "二度用户兴趣", "中间人ID", "中间人姓名", "路径"]
-
-            # 验证每条数据的格式
-            for row in rows:
-                assert int(row["二度用户ID"]) > 0
-                assert row["二度用户姓名"] != ""
-                assert int(row["中间人ID"]) > 0
-                assert row["中间人姓名"] != ""
-                # 路径格式：用户ID→用户ID→用户ID
-                path_parts = row["路径"].split("→")
-                assert len(path_parts) == 3
-                assert int(path_parts[0]) == 1  # 起点是中心用户
-
-        print(f"✅ test_export_second_degree_to_csv_weight_sort：成功导出 {len(rows)} 条二度人脉")
-
-    def test_export_second_degree_to_csv_interest_sort(self, graph, tmp_path):
-        """测试导出二度人脉CSV - 兴趣排序策略"""
-        print_test_title("测试导出二度人脉CSV（兴趣排序）")
-
-        output_file = tmp_path / "test_export_second_degree_interest.csv"
-
-        result = graph.export_second_degree_to_csv(1, str(output_file), sort_strategy="interest")
-        assert result is True
-
-        assert output_file.exists()
-
-        import csv
-        with open(output_file, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-
-            assert reader.fieldnames == ["二度用户ID", "二度用户姓名", "二度用户兴趣", "中间人ID", "中间人姓名", "路径"]
-            assert len(rows) > 0
-
-        print(f"✅ test_export_second_degree_to_csv_interest_sort：兴趣排序导出成功")
-
-    def test_export_second_degree_no_data(self, empty_graph, tmp_path):
-        """测试导出二度人脉 - 无数据场景"""
-        print_test_title("测试二度人脉导出 - 无数据场景")
-
-        # 添加一个用户但没有好友
-        empty_graph.add_user(1, "孤岛用户", ["阅读"])
-
-        output_file = tmp_path / "test_export_empty.csv"
-
-        result = empty_graph.export_second_degree_to_csv(1, str(output_file))
-        assert result is True
-
-        assert output_file.exists()
-
-        import csv
-        with open(output_file, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            assert len(rows) == 0  # 无数据，只有表头
-
-        print("✅ test_export_second_degree_no_data：无数据场景导出正常")
-
-    def test_export_second_degree_invalid_user(self, graph, tmp_path):
-        """测试导出二度人脉 - 用户不存在场景"""
-        print_test_title("测试二度人脉导出 - 用户不存在")
-
-        output_file = tmp_path / "test_export_invalid.csv"
-
-        result = graph.export_second_degree_to_csv(999, str(output_file))
-        assert result is False  # 用户不存在，导出失败
-
-        print("✅ test_export_second_degree_invalid_user：用户不存在时正确返回False")
-
-    def test_export_all_formats_integration(self, graph, tmp_path):
-        """综合测试：连续导出三种格式，确保数据一致性"""
-        print_test_title("综合测试：三种导出格式一致性")
-
-        # 1. 导出用户
-        user_file = tmp_path / "users_export.csv"
-        graph.export_users_to_csv(str(user_file))
-
-        # 2. 导出关系
-        rel_file = tmp_path / "relations_export.csv"
-        graph.export_relationships_to_csv(str(rel_file))
-
-        # 3. 导出二度人脉
-        second_file = tmp_path / "second_export.csv"
-        graph.export_second_degree_to_csv(1, str(second_file))
-
-        # 验证所有文件都存在
-        assert user_file.exists()
-        assert rel_file.exists()
-        assert second_file.exists()
-
-        # 验证用户文件中的用户ID都在关系文件中有记录
-        import csv
-        with open(user_file, "r", encoding="utf-8-sig") as f:
-            user_rows = list(csv.DictReader(f))
-            user_ids = {int(row["用户ID"]) for row in user_rows}
-
-        with open(rel_file, "r", encoding="utf-8-sig") as f:
-            rel_rows = list(csv.DictReader(f))
-            rel_user_ids = set()
-            for row in rel_rows:
-                rel_user_ids.add(int(row["用户ID1"]))
-                rel_user_ids.add(int(row["用户ID2"]))
-
-        # 关系中的用户都应该在用户表中有记录
-        assert rel_user_ids.issubset(user_ids)
-
-        print("✅ test_export_all_formats_integration：三种导出格式数据一致性验证通过")
+        print(f"\n📂 文件位置: {output_file}")
