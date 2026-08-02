@@ -5,14 +5,15 @@ from typing import Dict, Set, Tuple, List, Optional
 
 
 # ========================【数据结构代码开始】========================
-# 1. 自主实现哈希表，链地址法，替代原生dict存储user_attrs
+# 1. 自主实现哈希表，链地址法，适配任意可哈希key（int/字符串等），替代原生dict存储user_attrs、interest_index
 class HashTable:
     def __init__(self, capacity=100):
         self.capacity = capacity
         self.buckets = [[] for _ in range(capacity)]
 
     def _hash(self, key):
-        return key % self.capacity
+        # 支持int、字符串等所有可哈希类型，不再限制仅整数取模
+        return hash(key) % self.capacity
 
     def put(self, key, value):
         idx = self._hash(key)
@@ -40,6 +41,25 @@ class HashTable:
     # 新增方法，适配GUI的 in 判断，无需改动GUI
     def __contains__(self, key):
         return self.get(key) is not None
+
+    # 新增遍历全部键值对，适配遍历需求（遍历兴趣索引、遍历全部用户）
+    def items(self):
+        all_items = []
+        for bucket in self.buckets:
+            all_items.extend(bucket)
+        return all_items
+
+    # 新增获取所有key，适配循环遍历场景
+    def keys(self):
+        key_list = []
+        for bucket in self.buckets:
+            for k, v in bucket:
+                key_list.append(k)
+        return key_list
+
+    # 新增删除指定key，适配del语法兼容
+    def __delitem__(self, key):
+        self.remove(key)
 
 
 # 2. 自主实现小顶堆，完全弃用heapq
@@ -99,8 +119,8 @@ class SocialGraph:
         self.user_attrs = HashTable()
         # 关系权重：(较小用户ID, 较大用户ID) -> 权重值（避免重复存储）
         self.edge_weights: Dict[Tuple[int, int], int] = {}
-        # 兴趣倒排索引，适配智能推荐模块
-        self.interest_index: Dict[str, List[int]] = {}
+        # 【改造】兴趣倒排索引彻底替换为自研HashTable，不再使用原生dict
+        self.interest_index: HashTable = HashTable()
         # ===================== 新增：黑名单集合（中优3 扩展A） =====================
         self.blacklist: Set[int] = set()
 
@@ -168,14 +188,22 @@ class SocialGraph:
         user_info = self.user_attrs.get(user_id)
         self.user_attrs.remove(user_id)
 
-        # 遍历兴趣倒排索引，移除当前用户ID
+        # 遍历兴趣倒排索引，移除当前用户ID（适配自研HashTable）
         if user_info and "interests" in user_info:
             interests = user_info["interests"]
+            all_interest_tags = self.interest_index.keys()
             for tag in interests:
-                if tag in self.interest_index and user_id in self.interest_index[tag]:
-                    self.interest_index[tag].remove(user_id)
+                if tag in self.interest_index:
+                    uid_list = self.interest_index.get(tag)
+                    if user_id in uid_list:
+                        uid_list.remove(user_id)
+                        self.interest_index.put(tag, uid_list)
             # 清理空兴趣分类（无用户的兴趣删掉）
-            empty_tags = [k for k, v in self.interest_index.items() if len(v) == 0]
+            empty_tags = []
+            for tag in self.interest_index.keys():
+                uid_arr = self.interest_index.get(tag)
+                if len(uid_arr) == 0:
+                    empty_tags.append(tag)
             for tag in empty_tags:
                 del self.interest_index[tag]
 
@@ -201,15 +229,17 @@ class SocialGraph:
         return True
 
     def _update_interest_index(self, user_id: int, interests: List[str]) -> None:
-        """私有方法维护兴趣倒排索引，给智能推荐提供数据"""
+        """私有方法维护兴趣倒排索引，给智能推荐提供数据（适配自研HashTable）"""
         if not interests:
             return
         for interest in interests:
             interest = interest.strip()
             if interest not in self.interest_index:
-                self.interest_index[interest] = []
-            if user_id not in self.interest_index[interest]:
-                self.interest_index[interest].append(user_id)
+                self.interest_index.put(interest, [])
+            uid_list = self.interest_index.get(interest)
+            if user_id not in uid_list:
+                uid_list.append(user_id)
+                self.interest_index.put(interest, uid_list)
 
     def add_friendship(self, user1: int, user2: int, weight: int = 1) -> bool:
         """
