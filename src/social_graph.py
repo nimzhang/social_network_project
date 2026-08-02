@@ -563,7 +563,9 @@ class SocialGraph:
         # key:候选用户ID, value:匹配兴趣列表
         user_match_interests: Dict[int, List[str]] = defaultdict(list)
         for interest in my_interests:
-            for candidate_uid in self.interest_index.get(interest, []):
+            uid_list = self.interest_index.get(interest)
+            uid_list = uid_list if uid_list is not None else []
+            for candidate_uid in uid_list:
                 if candidate_uid not in exclude_users:
                     user_match_interests[candidate_uid].append(interest)
 
@@ -654,7 +656,9 @@ class SocialGraph:
         # 1. 获取兴趣匹配用户
         match_dict: Dict[int, List[str]] = defaultdict(list)
         for inter in my_interests:
-            for uid in self.interest_index.get(inter, []):
+            uid_list = self.interest_index.get(inter)
+            uid_list = uid_list if uid_list is not None else []
+            for uid in uid_list:
                 if uid not in exclude:
                     match_dict[uid].append(inter)
 

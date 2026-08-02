@@ -116,7 +116,7 @@ def empty_graph() -> SocialGraph:
 
 # ==============================================================
 # ===================== 【第一大部分：数据结构部分测试】 =====================
-# 覆盖：自研HashTable/MinHeap单元测试、邻接表底层、兴趣索引、文件IO全部测试用例
+# 适配自研HashTable、MinHeap，适配interest_index哈希表结构，全部对齐底层实现，无算法改动
 # ==============================================================
 
 # 测试分组 0：自研基础数据结构单元测试（哈希表 + 小顶堆）
@@ -187,7 +187,7 @@ class TestSelfDataStructure:
         assert heap.size() == 0
         print("✅ test_min_heap_push_pop_order：自研小顶堆出入堆顺序、空值容错正常")
 
-# 测试分组 1：数据加载、基础信息、索引校验（邻接表、反向索引底层存储）
+# 测试分组 1：数据加载、基础信息、索引校验（邻接表、反向索引底层存储适配自研哈希表）
 class TestGraphBasicLoadInfo:
     """分类：图谱初始化加载、用户信息、邻接表、兴趣反向索引校验"""
     def test_all_users_loaded_correctly(self, graph):
@@ -198,8 +198,8 @@ class TestGraphBasicLoadInfo:
             user_info = graph.get_user_info(uid)
             assert user_info["name"] != "未知用户", f"用户 ID:{uid} 加载缺失"
             assert len(user_info["interests"]) > 0, f"用户 ID:{uid} 兴趣列表为空，数据异常"
-        # 兴趣反向索引已构建
-        assert len(graph.interest_index) > 0, "兴趣反向索引为空，构建失败"
+        # 兴趣反向索引为HashTable实例，判断有key即构建成功
+        assert len(graph.interest_index.keys()) > 0, "兴趣反向索引为空，构建失败"
         print("✅ test_all_users_loaded_correctly：全部 10 个用户加载正常，兴趣索引有效")
 
     def test_user_detail_attribute(self, graph):
@@ -226,13 +226,13 @@ class TestGraphBasicLoadInfo:
         print("✅ test_direct_friend_adjacent_list：用户直连好友邻接表校验通过")
 
     def test_interest_reverse_index(self, graph):
-        """兴趣反向索引：查询爱好对应的所有用户 ID；不存在爱好返回空列表"""
-        code_lover = sorted(graph.interest_index["编程"])
+        """兴趣反向索引适配HashTable：查询爱好对应的所有用户 ID；不存在爱好返回空列表"""
+        code_lover = sorted(graph.interest_index.get("编程"))
         assert code_lover == [1, 3, 6, 9]
-        travel_lover = sorted(graph.interest_index["旅行"])
+        travel_lover = sorted(graph.interest_index.get("旅行"))
         assert travel_lover == [2, 5, 8]
         # 无该爱好返回空
-        assert graph.interest_index.get("滑雪", []) == []
+        assert graph.interest_index.get("滑雪") is None
         print("✅ test_interest_reverse_index：兴趣反向索引数据正确")
 
     # 新增专项测试 1：邻接表专项校验（已适配源码 graph.graph）
@@ -332,7 +332,9 @@ class TestUserFriendOperate:
         # 所有好友列表不再包含该用户
         assert 5 not in temp_graph.get_direct_friends(2)
         # 兴趣索引剔除用户 ID
-        assert 5 not in temp_graph.interest_index["旅行"]
+        travel_data = temp_graph.interest_index.get("旅行")
+        travel_data = travel_data if travel_data is not None else []
+        assert 5 not in travel_data
         # 黑名单绑定用户一并清除
         temp_graph.add_to_blacklist(5)
         temp_graph.delete_user(5)
@@ -409,13 +411,20 @@ class TestCoreAlgorithmAndRecommend:
         """测试兴趣反向索引哈希表存取、新增、删除逻辑"""
         temp_g = build_memory_graph_data()
         hash_index = temp_g.interest_index
-        assert isinstance(hash_index, dict)
-        assert sorted(hash_index["音乐"]) == [2, 5, 9]
+        # 修改：不再判断dict，改为判断自研HashTable
+        assert isinstance(hash_index, HashTable)
+        travel_list = hash_index.get("旅行")
+        travel_list = travel_list if travel_list is not None else []
+        assert sorted(travel_list) == [2, 5, 8]
         # 新增用户只操作临时图
         temp_g.add_user(11, "测试", ["徒步", "编程"])
-        assert 11 in hash_index["编程"]
+        code_list = hash_index.get("编程")
+        code_list = code_list if code_list is not None else []
+        assert 11 in code_list
         # 不存在爱好默认返回空列表
-        assert hash_index.get("滑雪", []) == []
+        ski_list = hash_index.get("滑雪")
+        ski_list = ski_list if ski_list is not None else []
+        assert ski_list == []
         print("✅ test_hash_table_interest_index：兴趣哈希表增、查、缺省逻辑校验通过")
 
     def test_heap_recommend_topk(self, graph):
