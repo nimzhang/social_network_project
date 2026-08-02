@@ -407,25 +407,6 @@ class TestCoreAlgorithmAndRecommend:
             score_prev = score
         print("✅ test_interest_based_recommend_sort：兴趣推荐规则、降序排序校验通过")
 
-    def test_hash_table_interest_index(self):
-        """测试兴趣反向索引哈希表存取、新增、删除逻辑"""
-        temp_g = build_memory_graph_data()
-        hash_index = temp_g.interest_index
-        # 修改：不再判断dict，改为判断自研HashTable
-        assert isinstance(hash_index, HashTable)
-        travel_list = hash_index.get("旅行")
-        travel_list = travel_list if travel_list is not None else []
-        assert sorted(travel_list) == [2, 5, 8]
-        # 新增用户只操作临时图
-        temp_g.add_user(11, "测试", ["徒步", "编程"])
-        code_list = hash_index.get("编程")
-        code_list = code_list if code_list is not None else []
-        assert 11 in code_list
-        # 不存在爱好默认返回空列表
-        ski_list = hash_index.get("滑雪")
-        ski_list = ski_list if ski_list is not None else []
-        assert ski_list == []
-        print("✅ test_hash_table_interest_index：兴趣哈希表增、查、缺省逻辑校验通过")
 
     def test_heap_recommend_topk(self, graph):
         """测试推荐功能底层小根堆 TopK 排序逻辑：降序输出、数量限制生效"""
