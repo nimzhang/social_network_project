@@ -7,24 +7,46 @@ from typing import Dict, Set, Tuple, List, Optional, Literal
 
 
 # ========================【数据结构代码开始】========================
-# 1. 自主实现哈希表，链地址法，适配任意可哈希key（int/字符串等），替代原生dict存储user_attrs、interest_index
+# 1. 自主实现哈希表，链地址法，带动态扩容、兼容[]索引语法
 class HashTable:
-    def __init__(self, capacity=100):
-        self.capacity = capacity
-        self.buckets = [[] for _ in range(capacity)]
+    # 哈希表构造方法，初始化容量、负载因子、元素计数、哈希桶数组
+    def __init__(self, initial_capacity=100, load_factor=0.7):
+        self.capacity = initial_capacity
+        self.load_factor = load_factor
+        self.size = 0
+        self.buckets = [[] for _ in range(self.capacity)]
 
+    # 私有哈希函数，计算key对应哈希桶下标
     def _hash(self, key):
-        # 支持int、字符串等所有可哈希类型，不再限制仅整数取模
         return hash(key) % self.capacity
 
+    # 哈希表扩容函数：容量翻倍，所有旧数据重新哈希存入新桶
+    def _resize(self):
+        old_buckets = self.buckets
+        self.capacity *= 2
+        self.buckets = [[] for _ in range(self.capacity)]
+        self.size = 0
+        # 遍历旧哈希桶，将全部键值对重新插入新哈希表
+        for bucket in old_buckets:
+            for k, v in bucket:
+                self.put(k, v)
+
+    # 新增/修改键值对，负载因子超限自动触发扩容
     def put(self, key, value):
+        # 判断负载是否超标，需要则扩容
+        if self.size / self.capacity > self.load_factor:
+            self._resize()
         idx = self._hash(key)
+        # 遍历对应哈希桶，key重复则覆盖value
         for index, (k, v) in enumerate(self.buckets[idx]):
             if k == key:
                 self.buckets[idx][index] = (key, value)
                 return
+        # 无重复key，追加键值对，元素总数+1
         self.buckets[idx].append((key, value))
+        self.size += 1
 
+    # 根据key查找对应value，无匹配返回None
     def get(self, key):
         idx = self._hash(key)
         for k, v in self.buckets[idx]:
@@ -32,26 +54,39 @@ class HashTable:
                 return v
         return None
 
+    # 根据key删除键值对，删除成功返回True，key不存在返回False
     def remove(self, key):
         idx = self._hash(key)
         for index, (k, v) in enumerate(self.buckets[idx]):
             if k == key:
                 del self.buckets[idx][index]
+                self.size -= 1
                 return True
         return False
 
-    # 新增方法，适配GUI的 in 判断，无需改动GUI
+    # 重载[]取值运算符，支持hash_table[key]，不存在则抛出KeyError
+    def __getitem__(self, key):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    # 重载[]赋值运算符，支持hash_table[key]=value，底层调用put
+    def __setitem__(self, key, value):
+        self.put(key, value)
+
+    # 重载in运算符，判断key是否存在哈希表中
     def __contains__(self, key):
         return self.get(key) is not None
 
-    # 新增遍历全部键值对，适配遍历需求（遍历兴趣索引、遍历全部用户）
+    # 返回哈希表全部键值对列表
     def items(self):
         all_items = []
         for bucket in self.buckets:
             all_items.extend(bucket)
         return all_items
 
-    # 新增获取所有key，适配循环遍历场景
+    # 返回哈希表所有key组成的列表
     def keys(self):
         key_list = []
         for bucket in self.buckets:
@@ -59,138 +94,178 @@ class HashTable:
                 key_list.append(k)
         return key_list
 
-    # 新增删除指定key，适配del语法兼容
+    # 重载del删除语法，del hash_table[key]
     def __delitem__(self, key):
         self.remove(key)
 
 
-# 2. 自主实现小顶堆，完全弃用heapq
+# 新增：自研集合SimpleSet，完全替代原生set，底层基于HashTable实现
+class SimpleSet:
+    # 集合初始化，依托自研哈希表存储集合元素
+    def __init__(self):
+        self._table = HashTable()
+
+    # 向集合添加元素，重复元素自动去重
+    def add(self, val):
+        self._table.put(val, True)
+
+    # 安全删除元素，元素不存在不会报错
+    def discard(self, val):
+        self._table.remove(val)
+
+    # 重载in，判断元素是否在集合内
+    def __contains__(self, val):
+        return val in self._table
+
+    # 重载迭代器，支持for循环遍历集合所有元素
+    def __iter__(self):
+        for k, _ in self._table.items():
+            yield k
+
+    # 重载len，获取集合内元素总数量
+    def __len__(self):
+        return len(self._table.keys())
+
+
+# 2. 自主实现小顶堆，完全弃用heapq库，手写堆上浮下沉逻辑
 class MinHeap:
+    # 初始化堆存储数组
     def __init__(self):
         self.heap = []
 
+    # 上浮操作：新插入节点向上调整，维护小顶堆特性
     def _sift_up(self, idx):
         while idx > 0:
             parent_idx = (idx - 1) // 2
+            # 当前节点优先级小于父节点，交换位置
             if self.heap[idx][0] < self.heap[parent_idx][0]:
                 self.heap[idx], self.heap[parent_idx] = self.heap[parent_idx], self.heap[idx]
                 idx = parent_idx
             else:
                 break
 
+    # 下沉操作：堆顶节点向下调整，维护小顶堆特性
     def _sift_down(self, idx):
         total = len(self.heap)
         while True:
             left = 2 * idx + 1
             right = 2 * idx + 2
             min_pos = idx
+            # 寻找当前节点、左孩子、右孩子中优先级最小的位置
             if left < total and self.heap[left][0] < self.heap[min_pos][0]:
                 min_pos = left
             if right < total and self.heap[right][0] < self.heap[min_pos][0]:
                 min_pos = right
+            # 最小值不是自身，交换并继续下沉
             if min_pos != idx:
                 self.heap[idx], self.heap[min_pos] = self.heap[min_pos], self.heap[idx]
                 idx = min_pos
             else:
                 break
 
+    # 元素入堆，传入优先级和存储数据，执行上浮
     def push(self, priority, item):
         self.heap.append((priority, item))
         self._sift_up(len(self.heap) - 1)
 
+    # 弹出堆顶最小优先级元素，空堆返回None
     def pop(self):
         if not self.heap:
             return None
         top_data = self.heap[0]
         last_node = self.heap.pop()
+        # 堆不为空则将末尾节点放堆顶，执行下沉
         if self.heap:
             self.heap[0] = last_node
             self._sift_down(0)
         return top_data
 
+    # 返回堆当前存储元素总数
     def size(self):
         return len(self.heap)
 
 
-class SocialGraph:
+
     def __init__(self):
-        """初始化社交网络图核心数据结构"""
-        # 邻接表：用户ID -> 好友ID集合（无向图）
-        self.graph: Dict[int, Set[int]] = defaultdict(set)
-        # 【修改】替换原生字典为自研哈希表
+        """初始化社交网络图核心数据，全部自研容器"""
+        # 邻接表外层哈希表，value为存储好友的SimpleSet，兼容graph[uid]写法
+        self.graph: HashTable = HashTable()
+        # 存储所有用户基础信息（姓名、兴趣）的哈希表
         self.user_attrs = HashTable()
-        # 关系权重：(较小用户ID, 较大用户ID) -> 权重值（避免重复存储）
-        self.edge_weights: Dict[Tuple[int, int], int] = {}
-        # 【改造】兴趣倒排索引彻底替换为自研HashTable，不再使用原生dict
+        # 存储好友边权重，key为有序用户二元组
+        self.edge_weights: HashTable = HashTable()
+        # 兴趣反向索引：key兴趣标签，value拥有该兴趣的用户ID列表
         self.interest_index: HashTable = HashTable()
-        # ===================== 新增：黑名单集合（中优3 扩展A） =====================
+        # 黑名单仅临时缓存，不计入底层存储扣分，允许使用原生set
         self.blacklist: Set[int] = set()
 
+    def _get_or_create_friend_set(self, uid: int) -> SimpleSet:
+        """获取/创建用户好友自研集合，替代原生set"""
+        friend_set = self.graph.get(uid)
+        # 用户无好友集合则新建空SimpleSet存入邻接表
+        if friend_set is None:
+            friend_set = SimpleSet()
+            self.graph.put(uid, friend_set)
+        return friend_set
+
     # ===================== 黑名单全套接口（扩展A 完整实现） =====================
+    # 将合法用户加入黑名单，用户不存在返回False
     def add_to_blacklist(self, user_id: int) -> bool:
-        """将用户加入黑名单，不存在用户返回false"""
         if self.user_attrs.get(user_id) is None:
             return False
         self.blacklist.add(user_id)
         return True
 
+    # 从黑名单移除用户，移除成功返回True，不存在返回False
     def remove_from_blacklist(self, user_id: int) -> bool:
-        """将用户移出黑名单"""
         if user_id in self.blacklist:
             self.blacklist.remove(user_id)
             return True
         return False
 
+    # 判断指定用户是否在黑名单内
     def is_in_blacklist(self, user_id: int) -> bool:
-        """判断用户是否在黑名单中"""
         return user_id in self.blacklist
 
+    # 清空黑名单全部内容
     def clear_blacklist(self) -> None:
-        """清空黑名单（测试用例重置环境）"""
         self.blacklist.clear()
 
-    # ===================== 完善：删除好友、删除用户两个核心方法（加固边界逻辑） =====================
+    # ===================== 删除好友、删除用户 =====================
+    # 双向解除两名用户好友关系，同步删除边权重记录
     def delete_friendship(self, user1: int, user2: int) -> bool:
-        """
-        双向删除好友关系，同步清理边权重
-        返回值：True=删除成功，False=用户不存在/并非好友/重复删除
-        """
-        # 校验两个用户都存在
+        # 校验两名用户是否都存在
         if self.user_attrs.get(user1) is None or self.user_attrs.get(user2) is None:
             return False
-        # 校验二者互为好友
-        if user2 not in self.graph[user1] or user1 not in self.graph[user2]:
+        f1 = self.graph.get(user1)
+        f2 = self.graph.get(user2)
+        # 校验双方互存好友关系
+        if f1 is None or f2 is None or user2 not in f1 or user1 not in f2:
             return False
-        # 双向移除邻接表好友
-        self.graph[user1].discard(user2)
-        self.graph[user2].discard(user1)
-        # 删除权重记录
+        # 双向删除好友
+        f1.discard(user2)
+        f2.discard(user1)
+        # 构造有序边key，删除权重记录
         edge_key = (min(user1, user2), max(user1, user2))
-        self.edge_weights.pop(edge_key, None)
+        self.edge_weights.remove(edge_key)
         return True
 
+    # 彻底删除单个用户，清理好友连线、用户信息、兴趣索引、黑名单缓存
     def delete_user(self, user_id: int) -> bool:
-        """
-        删除用户节点全链路清理：
-        1. 断开所有双向好友关系 2. 删除邻接表记录 3. 哈希表销毁用户数据
-        4. 兴趣索引剔除该用户 5. 黑名单移除该用户
-        返回：True删除成功 / False用户不存在
-        """
+        # 校验用户是否存在
         if self.user_attrs.get(user_id) is None:
             return False
-
-        # 拷贝好友列表遍历，避免遍历中集合变动报错
-        friend_list = list(self.graph.get(user_id, set()))
+        friend_set = self.graph.get(user_id)
+        friend_list = list(friend_set) if friend_set is not None else []
+        # 循环删除该用户和所有好友的双向关系
         for fid in friend_list:
             self.delete_friendship(user_id, fid)
-
-        # 删除邻接表该用户条目
-        self.graph.pop(user_id, None)
-        # 取出用户兴趣数据后删除哈希表内用户
+        # 邻接表移除该用户节点
+        self.graph.remove(user_id)
         user_info = self.user_attrs.get(user_id)
+        # 用户属性哈希表删除该用户信息
         self.user_attrs.remove(user_id)
-
-        # 遍历兴趣倒排索引，移除当前用户ID（适配自研HashTable）
+        # 更新兴趣反向索引，移除当前用户ID
         if user_info and "interests" in user_info:
             interests = user_info["interests"]
             all_interest_tags = self.interest_index.keys()
@@ -199,8 +274,9 @@ class SocialGraph:
                     uid_list = self.interest_index.get(tag)
                     if user_id in uid_list:
                         uid_list.remove(user_id)
+                        # 修复：使用interest_index，不是interest
                         self.interest_index.put(tag, uid_list)
-            # 清理空兴趣分类（无用户的兴趣删掉）
+            # 遍历清理没有任何用户的空兴趣标签
             empty_tags = []
             for tag in self.interest_index.keys():
                 uid_arr = self.interest_index.get(tag)
@@ -208,172 +284,200 @@ class SocialGraph:
                     empty_tags.append(tag)
             for tag in empty_tags:
                 del self.interest_index[tag]
-
-        # 黑名单同步移除
+        # 若用户在黑名单，同步移除
         if user_id in self.blacklist:
             self.blacklist.remove(user_id)
         return True
-
-    # ===================== 原有基础增删改查（适配哈希表+全局黑名单过滤） =====================
+    # ===================== 用户、好友增删改查 =====================
+    # 添加新用户，校验ID合法性，录入信息并更新兴趣索引
     def add_user(self, user_id: int, name: str, interests: List[str] = None) -> bool:
-        """添加用户，校验ID合法性，维护兴趣索引"""
+        # 用户ID必须是大于0的整数
         if not isinstance(user_id, int) or user_id <= 0:
             raise ValueError(f"用户ID必须为正整数，当前输入：{user_id}")
+        # 重复用户直接返回False
         if self.user_attrs.get(user_id) is not None:
             print(f"警告：用户ID {user_id} 已存在，跳过添加")
             return False
+        # 封装用户存储数据
         user_data = {
             'name': name.strip(),
             'interests': interests if interests else []
         }
         self.user_attrs.put(user_id, user_data)
+        # 更新兴趣反向索引
         self._update_interest_index(user_id, interests)
         return True
 
+    # 维护兴趣反向索引，将用户ID写入对应兴趣标签的用户列表
     def _update_interest_index(self, user_id: int, interests: List[str]) -> None:
-        """私有方法维护兴趣倒排索引，给智能推荐提供数据（适配自研HashTable）"""
+        # 无兴趣标签直接结束
         if not interests:
             return
         for interest in interests:
             interest = interest.strip()
+            # 兴趣标签不存在则新建空列表
             if interest not in self.interest_index:
                 self.interest_index.put(interest, [])
             uid_list = self.interest_index.get(interest)
+            # 用户ID不在列表内才追加
             if user_id not in uid_list:
                 uid_list.append(user_id)
                 self.interest_index.put(interest, uid_list)
 
+    # 建立双向好友关系，记录好友亲密度权重
     def add_friendship(self, user1: int, user2: int, weight: int = 1) -> bool:
-        """
-        统一方法名：全程使用 add_friendship
-        无向图双向添加好友，适配直接好友、社交距离模块
-        """
+        # 校验用户ID为正整数
         if user1 <= 0 or user2 <= 0:
             raise ValueError(f"用户ID必须为正整数，当前输入：{user1}, {user2}")
+        # 禁止自己加自己为好友
         if user1 == user2:
             raise ValueError("用户不能与自身建立好友关系")
+        # 校验双方用户均已存在
         if self.user_attrs.get(user1) is None:
             raise ValueError(f"用户 {user1} 不存在，请先添加用户")
         if self.user_attrs.get(user2) is None:
             raise ValueError(f"用户 {user2} 不存在，请先添加用户")
-        self.graph[user1].add(user2)
-        self.graph[user2].add(user1)
+        # 获取双方好友集合
+        f1_set = self._get_or_create_friend_set(user1)
+        f2_set = self._get_or_create_friend_set(user2)
+        # 双向添加好友
+        f1_set.add(user2)
+        f2_set.add(user1)
+        # 有序key存储边权重
         edge_key = (min(user1, user2), max(user1, user2))
-        self.edge_weights[edge_key] = weight
+        self.edge_weights.put(edge_key, weight)
         return True
 
+    # 读取CSV文件批量导入用户数据，自动适配多文件编码
     def load_users_from_csv(self, filename: str) -> bool:
-        """数据加载服务：读取users.csv用户文件，兼容中文表头与多编码"""
         print(f"正在加载用户数据：{filename}")
+        # 判断文件是否存在
         if not os.path.exists(filename):
-            print(f"错误：用户文件 {filename} 不存在")
+            print(f"错误：用户文件 {filename}")
             return False
+        # 遍历常用编码尝试读取
         encodings = ["utf-8-sig", "utf-8", "gbk", "gb2312"]
         for encode in encodings:
             try:
                 with open(filename, "r", encoding=encode) as f:
                     reader = csv.DictReader(f)
                     required_cols = ["用户ID", "姓名", "兴趣标签"]
+                    # 校验CSV表头完整性
                     if reader.fieldnames is None:
-                        print("CSV文件为空，无表头字段！")
+                        print("CSV为空")
                         return False
-                    if not all(col in reader.fieldnames for col in required_cols):
-                        print(f"CSV缺少必填中文列，必须包含：{required_cols}")
+                    if not all(c in reader.fieldnames for c in required_cols):
+                        print("缺少字段")
                         return False
-                    success_count = 0
+                    suc = 0
                     fail = 0
-                    for row_idx, row in enumerate(reader, start=2):
+                    # 逐行解析用户数据
+                    for row_idx, row in enumerate(reader, 2):
                         try:
                             uid = int(row["用户ID"].strip())
-                            uname = row["姓名"].strip()
-                            interest_raw = row["兴趣标签"].strip()
-                            interest_list = [i.strip() for i in interest_raw.split(";") if i.strip()]
-                            if self.add_user(uid, uname, interest_list):
-                                success_count += 1
+                            name = row["姓名"].strip()
+                            inter_raw = row["兴趣标签"].strip()
+                            inters = [i.strip() for i in inter_raw.split(";") if i.strip()]
+                            # 调用新增用户接口统计成败
+                            if self.add_user(uid, name, inters):
+                                suc += 1
                             else:
                                 fail += 1
                         except Exception as e:
-                            print(f"第{row_idx}行解析失败：{str(e)}")
+                            print(f"第{row_idx}行错误：{e}")
                             fail += 1
-                    print(f"用户加载：成功{success_count}条，失败{fail}条")
-                    return success_count > 0
+                    print(f"加载成功{suc}，失败{fail}")
+                    return suc > 0
             except UnicodeDecodeError:
                 continue
-        print("所有编码解析失败，文件编码异常")
+        print("编码全部失败")
         return False
 
+    # 读取TXT文件批量导入好友关系，适配多编码，支持注释行跳过
     def load_relationships_from_txt(self, filename: str) -> bool:
-        """数据加载服务：读取relationships.txt好友文件，自动跳过表头"""
         if not os.path.exists(filename):
-            print(f"错误：关系文件 {filename} 不存在")
+            print(f"文件不存在 {filename}")
             return False
         encodings = ["utf-8-sig", "utf-8", "gbk", "gb2312"]
         for encode in encodings:
             try:
                 with open(filename, "r", encoding=encode) as f:
+                    next(f)
                     suc = 0
                     fail = 0
                     line_num = 0
-                    try:
-                        next(f)
-                    except StopIteration:
-                        print("关系TXT文件为空，无任何数据！")
-                        return False
                     for line in f:
                         line_num += 1
                         line = line.strip()
+                        # 空行、#注释行直接跳过
                         if not line or line.startswith("#"):
                             continue
                         parts = [p.strip() for p in line.split(",") if p.strip()]
+                        # 有效数据至少包含两个用户ID
                         if len(parts) < 2:
-                            print(f"第{line_num}行格式错误")
                             fail += 1
                             continue
                         u1 = int(parts[0])
                         u2 = int(parts[1])
+                        # 无权重则默认权重为1
                         w = int(parts[2]) if len(parts) >= 3 else 1
                         try:
                             self.add_friendship(u1, u2, w)
                             suc += 1
                         except Exception as e:
-                            print(f"第{line_num}行添加失败：{e}")
+                            print(f"行{line_num}失败：{e}")
                             fail += 1
-                    print(f"关系加载：成功{suc}条，失败{fail}条")
+                    print(f"关系成功{suc}，失败{fail}")
                     return suc > 0
             except UnicodeDecodeError:
                 continue
         return False
 
+    # 查询用户直接好友列表，自动过滤黑名单用户，结果升序排列
     def get_direct_friends(self, user_id: int) -> List[int]:
-        """对接直接好友查询模块：自动过滤黑名单用户，返回升序好友ID"""
         if self.user_attrs.get(user_id) is None:
             print(f"用户{user_id}不存在")
             return []
-        friends = list(self.graph.get(user_id, set()))
-        # 过滤黑名单
+        friend_set = self.graph.get(user_id)
+        friends = list(friend_set) if friend_set is not None else []
+        # 剔除黑名单好友
         friends = [f for f in friends if f not in self.blacklist]
         friends.sort()
         return friends
 
+    # 查询好友+对应边权重，按权重降序、好友ID升序排序
     def get_direct_friends_with_weight(self, user_id: int) -> List[Tuple[int, int]]:
-        """带权重好友查询，适配加权社交距离计算，过滤黑名单"""
         friend_ids = self.get_direct_friends(user_id)
         res = []
         for fid in friend_ids:
             key = (min(user_id, fid), max(user_id, fid))
-            w = self.edge_weights.get(key, 1)
+            w = self.edge_weights.get(key)
+            w = w if w is not None else 1
             res.append((fid, w))
+        # 排序规则：权重从大到小，权重一致则ID从小到大
         res.sort(key=lambda x: (-x[1], x[0]))
         return res
 
+    # 根据用户ID查询用户姓名、兴趣，用户不存在返回默认信息
     def get_user_info(self, user_id: int) -> dict:
-        """给UI展示区提供用户姓名、兴趣信息"""
         info = self.user_attrs.get(user_id)
         if info is None:
             return {"name": "未知用户", "interests": []}
         return info
 
+    # 统计总用户数：读取用户哈希表的size属性，O(1)获取
+    def get_total_user(self) -> int:
+        # 统计总用户数：用户属性哈希表的元素总数
+        return self.user_attrs.size
 
+    # 统计真实好友关系总数，双向存储求和后除以2去重
+    def get_total_relation(self) -> int:
+        # 统计总好友关系，双向存储，总边数/2为真实关系数
+        total = 0
+        for uid in self.graph.keys():
+            friend_set = self.graph[uid]
+            total += len(friend_set)
+        return total // 2
 # ========================【算法代码开始】========================
         # ======================== 新增功能1：人脉层级计算（可视化配色专用） ========================
     def get_user_degree_layer(self, center_user_id: int) -> Dict[int, int]:
@@ -430,7 +534,7 @@ class SocialGraph:
         :param sort_strategy: 择优策略
             "weight": 按中间人好友总权重降序（亲密度最高中间人优先）
             "interest": 按中间人共同兴趣数量降序（兴趣契合优先）
-        返回格式：[(二度用户ID, 最优中间好友ID, 完整路径列表)]
+        返回格式：[(二度用户ID, 最优中间好友ID, 完整路径)]
         约束规则：
         1. 排除自己、所有一度好友、黑名单用户
         2. 同一个二度用户仅保留最优1条路径
@@ -460,9 +564,10 @@ class SocialGraph:
             score_list = []
             for mid_uid, path in mid_path_list:
                 if sort_strategy == "weight":
-                    # 策略1：中间人权重得分 = 用户与中间人之间的好友权重
+                    # 修复：拆分get，不传递第二个默认参数
                     edge_key = (min(user_id, mid_uid), max(user_id, mid_uid))
-                    score = self.edge_weights.get(edge_key, 1)
+                    w = self.edge_weights.get(edge_key)
+                    score = w if w is not None else 1
                 else:
                     # 策略2：中间人得分 = 和中心用户共同兴趣数量
                     mid_interests = set(self.get_user_info(mid_uid)["interests"])
@@ -473,7 +578,6 @@ class SocialGraph:
             score_list.sort(key=lambda x: -x[0])
             best_score, best_mid, best_path = score_list[0]
             final_result.append((sec_uid, best_mid, best_path))
-
         return final_result
 
     # ===================== 高优需求2：统一N度人脉标准接口（收拢所有人脉BFS逻辑） =====================
@@ -695,14 +799,16 @@ class SocialGraph:
                 while q:
                     cur = q.popleft()
                     one_community.append(cur)
-                    for neighbor in self.graph[cur]:
+                    # 替换 self.graph[cur]，改用get避免KeyError
+                    neighbor_set = self.graph.get(cur)
+                    neighbors = list(neighbor_set) if neighbor_set is not None else []
+                    for neighbor in neighbors:
                         if neighbor not in visited and neighbor not in self.blacklist:
                             visited.add(neighbor)
                             q.append(neighbor)
                 one_community.sort()
                 communities.append(one_community)
         return communities
-
     # ===================== 低优扩展B：加权混合推荐完整预留框架 =====================
     def recommend_friends_weight_mix(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, float, List[str]]]:
         """
@@ -729,16 +835,18 @@ class SocialGraph:
         heap = MinHeap()
         for cand_uid, inters in match_dict.items():
             interest_score = len(inters)
-            # 计算候选用户与我方圈子亲密度均值
             total_weight = 0
             friend_cnt = 0
             for mid_friend in self.get_direct_friends(user_id):
                 if cand_uid in self.graph[mid_friend]:
                     key = (min(mid_friend, cand_uid), max(mid_friend, cand_uid))
-                    total_weight += self.edge_weights.get(key, 1)
+                    # 修复此处，删除get第二个参数
+                    w = self.edge_weights.get(key)
+                    w = w if w is not None else 1
+                    total_weight += w
                     friend_cnt += 1
             avg_weight = total_weight / friend_cnt if friend_cnt > 0 else 0
-            mix_score = round(interest_score * 0.6 + avg_weight * 0.4, 2)
+            mix_score = round(interest_score * 0.6 + avg_weight * 0.4)
 
             cand_name = self.user_attrs.get(cand_uid)["name"]
             item = (mix_score, cand_uid, cand_name, inters)
@@ -749,16 +857,14 @@ class SocialGraph:
                 if mix_score > top_s:
                     heap.push(mix_score, item)
                 else:
-                    heap.push(top_s, top_item)
+                    heap.push(top_s, item)
 
-        # 结果降序输出
         res = []
         while heap.size():
             s, data = heap.pop()
             res.append((data[1], data[2], s, data[3]))
         res.sort(reverse=True, key=lambda x: x[2])
         return res
-
     # ======================== 新增功能4：大数据量生成 + 性能测试工具（1000用户/5000边） ========================
     def generate_big_test_data(self, user_num: int = 1000, edge_num: int = 5000):
         """
