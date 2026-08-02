@@ -184,8 +184,7 @@ class MinHeap:
     def size(self):
         return len(self.heap)
 
-
-
+class SocialGraph:
     def __init__(self):
         """初始化社交网络图核心数据，全部自研容器"""
         # 邻接表外层哈希表，value为存储好友的SimpleSet，兼容graph[uid]写法
