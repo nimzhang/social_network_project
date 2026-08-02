@@ -1,7 +1,9 @@
 from collections import defaultdict, deque
 import csv
 import os
-from typing import Dict, Set, Tuple, List, Optional
+import random
+import time
+from typing import Dict, Set, Tuple, List, Optional, Literal
 
 
 # ========================【数据结构代码开始】========================
@@ -370,45 +372,109 @@ class SocialGraph:
         if info is None:
             return {"name": "未知用户", "interests": []}
         return info
-# ========================【数据结构代码结束】========================
+
 
 # ========================【算法代码开始】========================
-    # ===================== 【重点修复】带路径二度人脉查询（去重+严格过滤黑名单+固定路径长度3） =====================
-    def find_second_degree_with_path(self, user_id: int) -> List[Tuple[int, int, List[int]]]:
+        # ======================== 新增功能1：人脉层级计算（可视化配色专用） ========================
+    def get_user_degree_layer(self, center_user_id: int) -> Dict[int, int]:
         """
-        查询目标用户所有二度人脉，附带连接路径
-        返回格式：[(二度用户ID, 中间好友ID, 完整路径列表)]
-        约束规则（完全适配pytest断言）：
+        以中心用户为原点，计算全网所有节点人脉层级，用于可视化颜色区分
+        返回字典：{用户ID: 层级数值}
+        层级定义：
+            0: 中心用户自己
+            1: 一度人脉（直接好友）→ 红色
+            2: 二度人脉 → 橙色
+            3及以上: 其余所有节点 → 灰色
+        自动跳过黑名单节点（不纳入遍历）
+        """
+        if self.user_attrs.get(center_user_id) is None:
+            return {}
+
+        layer_map = defaultdict(int)
+        visited = set()
+        q = deque()
+        q.append((center_user_id, 0))
+        visited.add(center_user_id)
+        layer_map[center_user_id] = 0
+
+        while q:
+            cur_uid, depth = q.popleft()
+            # 超过2度不再深入遍历，统一归为灰色
+            if depth >= 2:
+                continue
+            for neighbor in self.graph[cur_uid]:
+                if neighbor in visited or neighbor in self.blacklist:
+                    continue
+                visited.add(neighbor)
+                new_depth = depth + 1
+                layer_map[neighbor] = new_depth
+                q.append((neighbor, new_depth))
+
+        # 剩余未遍历到的节点统一标记为3（其他人脉，灰色）
+        all_uid_list = self.user_attrs.keys()
+        for uid in all_uid_list:
+            if uid not in layer_map and uid not in self.blacklist:
+                layer_map[uid] = 3
+
+        return dict(layer_map)
+
+    # ===================== 【重构优化2：二度人脉择优路径，支持两种排序策略】 =====================
+    def find_second_degree_with_path(
+            self,
+            user_id: int,
+            sort_strategy: Literal["weight", "interest"] = "weight"
+    ) -> List[Tuple[int, int, List[int]]]:
+        """
+        查询目标用户所有二度人脉，附带最优连接路径（不再取遍历第一条）
+        :param user_id: 起始中心用户
+        :param sort_strategy: 择优策略
+            "weight": 按中间人好友总权重降序（亲密度最高中间人优先）
+            "interest": 按中间人共同兴趣数量降序（兴趣契合优先）
+        返回格式：[(二度用户ID, 最优中间好友ID, 完整路径列表)]
+        约束规则：
         1. 排除自己、所有一度好友、黑名单用户
-        2. 同一个二度用户只保留1条路径（去重）
+        2. 同一个二度用户仅保留最优1条路径
         3. 路径固定长度=3：[起点,中间人,二度好友]
-        4. 自动屏蔽黑名单节点
         """
         if self.user_attrs.get(user_id) is None:
             return []
 
-        # 获取过滤黑名单后的一度好友集合
         first_friends = set(self.get_direct_friends(user_id))
-        visited_second = set()  # 记录已经加入结果的二度用户，去重
-        result = []
+        second_candidates = defaultdict(list)  # key:二度好友ID, value: [(中间人ID,路径)]
 
-        # 遍历每一个中间一级好友
+        # 第一步：收集所有可达二度人脉+全部可达中间人路径
         for mid_uid in first_friends:
-            # 获取中间人过滤黑名单后的好友列表
-            mid_all_friends = self.get_direct_friends(mid_uid)
-            for sec_uid in mid_all_friends:
-                # 多重筛选条件
-                if (sec_uid == user_id  # 排除自己
-                        or sec_uid in first_friends  # 排除一度好友
-                        or sec_uid in visited_second  # 去重二度节点
-                        or sec_uid in self.blacklist):  # 排除黑名单
+            mid_friends = self.get_direct_friends(mid_uid)
+            for sec_uid in mid_friends:
+                # 过滤条件
+                if sec_uid == user_id or sec_uid in first_friends or sec_uid in self.blacklist:
                     continue
-
-                visited_second.add(sec_uid)
                 path = [user_id, mid_uid, sec_uid]
-                result.append((sec_uid, mid_uid, path))
+                second_candidates[sec_uid].append((mid_uid, path))
 
-        return result
+        # 第二步：对每个二度好友，按照策略选出最优中间人路径
+        final_result = []
+        user_base_interests = set(self.get_user_info(user_id)["interests"])
+
+        for sec_uid, mid_path_list in second_candidates.items():
+            score_list = []
+            for mid_uid, path in mid_path_list:
+                if sort_strategy == "weight":
+                    # 策略1：中间人权重得分 = 用户与中间人之间的好友权重
+                    edge_key = (min(user_id, mid_uid), max(user_id, mid_uid))
+                    score = self.edge_weights.get(edge_key, 1)
+                else:
+                    # 策略2：中间人得分 = 和中心用户共同兴趣数量
+                    mid_interests = set(self.get_user_info(mid_uid)["interests"])
+                    score = len(user_base_interests & mid_interests)
+                score_list.append((score, mid_uid, path))
+
+            # 得分降序排序，取最高分第一条最优路径
+            score_list.sort(key=lambda x: -x[0])
+            best_score, best_mid, best_path = score_list[0]
+            final_result.append((sec_uid, best_mid, best_path))
+
+        return final_result
 
     # ===================== 高优需求2：统一N度人脉标准接口（收拢所有人脉BFS逻辑） =====================
     def find_n_degree_friends(self, user_id: int, n: int) -> List[int]:
@@ -488,10 +554,11 @@ class SocialGraph:
         dist = len(path) - 1
         return dist, path
 
-    # ===================== Dijkstra加权最短路径（过滤黑名单） =====================
+    # ===================== 优化3：Dijkstra懒加载实现，移除全节点预初始化 =====================
     def get_weighted_shortest_path(self, start_uid: int, end_uid: int) -> Tuple[int, List[int]]:
         """
-        Dijkstra迪杰斯特拉算法：计算带权重好友的最短路径（总权重最小）
+        Dijkstra迪杰斯特拉算法：惰性更新实现，无需预先遍历所有用户初始化距离字典
+        大数据量节点下内存占用更低、初始化耗时大幅缩短
         返回：(总权重, 路径列表) 不可达/黑名单返回 (-1, [])
         """
         if self.user_attrs.get(start_uid) is None or self.user_attrs.get(end_uid) is None:
@@ -502,14 +569,11 @@ class SocialGraph:
             return 0, [start_uid]
 
         INF = float('inf')
-        # 遍历哈希表取出全部用户ID
-        all_uids = []
-        for bucket in self.user_attrs.buckets:
-            for k, v in bucket:
-                all_uids.append(k)
-        dist: Dict[int, int] = {uid: INF for uid in all_uids}
-        prev_node: Dict[int, Optional[int]] = {uid: None for uid in all_uids}
+        dist: Dict[int, int] = dict()       # 惰性创建：仅存入遍历到的节点
+        prev_node: Dict[int, Optional[int]] = dict()
         dist[start_uid] = 0
+        prev_node[start_uid] = None
+
         heap = MinHeap()
         heap.push(0, start_uid)
 
@@ -517,23 +581,28 @@ class SocialGraph:
             cur_weight, cur_uid = heap.pop()
             if cur_uid == end_uid:
                 break
-            if cur_weight > dist[cur_uid]:
+            # 堆内存在过期旧记录，直接跳过
+            if cur_weight > dist.get(cur_uid, INF):
                 continue
-            # 遍历邻居，跳过黑名单用户
+
+            # 遍历邻接好友
             for neighbor in self.graph[cur_uid]:
                 if neighbor in self.blacklist:
                     continue
                 edge_key = (min(cur_uid, neighbor), max(cur_uid, neighbor))
                 w = self.edge_weights[edge_key]
-                if dist[neighbor] > dist[cur_uid] + w:
-                    dist[neighbor] = dist[cur_uid] + w
-                    prev_node[neighbor] = cur_uid
-                    heap.push(dist[neighbor], neighbor)
+                new_dist = cur_weight + w
 
-        if dist[end_uid] == INF:
+                # 节点未访问过 / 找到更短路径时更新
+                if new_dist < dist.get(neighbor, INF):
+                    dist[neighbor] = new_dist
+                    prev_node[neighbor] = cur_uid
+                    heap.push(new_dist, neighbor)
+
+        if dist.get(end_uid, INF) == INF:
             return -1, []
 
-        # 回溯路径
+        # 回溯生成路径
         path = []
         tmp = end_uid
         while tmp is not None:
@@ -601,10 +670,7 @@ class SocialGraph:
         """度中心性计算：统计每个用户好友数量，找出社群核心用户"""
         centrality_list = []
         # 遍历哈希表全部用户
-        all_uids = []
-        for bucket in self.user_attrs.buckets:
-            for k, v in bucket:
-                all_uids.append(k)
+        all_uids = self.user_attrs.keys()
         for uid in all_uids:
             # 过滤黑名单后的有效好友数
             valid_friends = [f for f in self.graph[uid] if f not in self.blacklist]
@@ -618,10 +684,7 @@ class SocialGraph:
         """连通分量查找：划分社交网络所有独立社群，跳过黑名单节点"""
         visited = set()
         communities = []
-        all_uids = []
-        for bucket in self.user_attrs.buckets:
-            for k, v in bucket:
-                all_uids.append(k)
+        all_uids = self.user_attrs.keys()
         all_users = [uid for uid in all_uids if uid not in self.blacklist]
 
         for uid in all_users:
@@ -695,4 +758,84 @@ class SocialGraph:
             res.append((data[1], data[2], s, data[3]))
         res.sort(reverse=True, key=lambda x: x[2])
         return res
+
+    # ======================== 新增功能4：大数据量生成 + 性能测试工具（1000用户/5000边） ========================
+    def generate_big_test_data(self, user_num: int = 1000, edge_num: int = 5000):
+        """
+        随机生成大规模社交网络数据集
+        :param user_num: 用户总数 默认1000
+        :param edge_num: 好友边总数 默认5000
+        """
+        # 清空原有数据
+        self.__init__()
+        interest_pool = ["游戏", "阅读", "篮球", "电影", "音乐", "旅行", "美食", "编程", "摄影", "健身"]
+
+        # 批量创建用户
+        for uid in range(1, user_num + 1):
+            name = f"用户{uid}"
+            # 随机分配2~4个兴趣标签
+            rand_interests = random.sample(interest_pool, k=random.randint(2, 4))
+            self.add_user(uid, name, rand_interests)
+
+        # 随机生成无向好友边，不重复、不自环
+        created_edges = set()
+        while len(created_edges) < edge_num:
+            u = random.randint(1, user_num)
+            v = random.randint(1, user_num)
+            if u == v:
+                continue
+            edge_key = (min(u, v), max(u, v))
+            if edge_key not in created_edges:
+                weight = random.randint(1, 10)
+                self.add_friendship(u, v, weight)
+                created_edges.add(edge_key)
+        print(f"✅ 大数据测试集生成完成：用户数={user_num}，好友边数={edge_num}")
+
+    def run_performance_test(self, test_center_id: int = 1):
+        """
+        执行全套性能测试，打印各算法耗时
+        测试项：N度人脉查询、BFS最短路径、Dijkstra加权路径、二度人脉择优查询
+        """
+        print("\n========== 大数据性能测试报告 ==========")
+        # 1. 一度、二度人脉查询耗时
+        start = time.perf_counter()
+        self.find_n_degree_friends(test_center_id, 1)
+        self.find_n_degree_friends(test_center_id, 2)
+        t1 = time.perf_counter() - start
+        print(f"1. 一度+二度人脉BFS查询耗时: {t1:.4f} s")
+
+        # 2. BFS无权最短路径
+        start = time.perf_counter()
+        self.get_shortest_distance(test_center_id, random.randint(2, 1000))
+        t2 = time.perf_counter() - start
+        print(f"2. BFS无权最短路径查询耗时: {t2:.4f} s")
+
+        # 3. Dijkstra加权最短路径（懒加载优化后）
+        start = time.perf_counter()
+        self.get_weighted_shortest_path(test_center_id, random.randint(2, 1000))
+        t3 = time.perf_counter() - start
+        print(f"3. Dijkstra加权路径(惰性更新)耗时: {t3:.4f} s")
+
+        # 4. 择优二度人脉遍历
+        start = time.perf_counter()
+        self.find_second_degree_with_path(test_center_id, sort_strategy="weight")
+        t4 = time.perf_counter() - start
+        print(f"4. 择优二度人脉遍历耗时: {t4:.4f} s")
+
+        # 5. 人脉层级计算（可视化配色）
+        start = time.perf_counter()
+        self.get_user_degree_layer(test_center_id)
+        t5 = time.perf_counter() - start
+        print(f"5. 全网人脉层级计算(可视化用)耗时: {t5:.4f} s")
+        print("========================================\n")
 # ========================【算法代码结束】========================
+
+# 1. 定义顶层main函数
+def main():
+    """程序主入口函数，性能演示/整体运行入口"""
+    # 这里放你原本要执行的所有主逻辑代码
+    pass
+
+# 2. 脚本直接运行时调用main
+if __name__ == "__main__":
+    main()
