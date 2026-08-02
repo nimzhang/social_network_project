@@ -436,34 +436,58 @@ class TestCoreAlgorithmAndRecommend:
 
 # ===================== 【全新新增测试分组：数据导出功能测试】 =====================
 class TestDataExportFeature:
-    """测试功能3：数据导出（展开版邻接表）"""
+    """测试功能3：数据导出"""
 
-    def test_export_adjacency_list_expanded(self, graph, tmp_path):
-        """测试导出展开版邻接表（每行一条关系）"""
-        print_test_title("测试展开版邻接表导出")
+    def test_export_adjacency_list(self, graph, tmp_path):
+        """测试导出标准邻接表"""
+        print_test_title("测试标准邻接表导出")
 
-        output_file = tmp_path / "export_adj_expanded.csv"
+        output_file = tmp_path / "export_adjacency_list.txt"
 
-        result = graph.export_adjacency_list_expanded(str(output_file))
+        result = graph.export_adjacency_list(str(output_file))
         assert result is True
 
         assert output_file.exists()
 
-        with open(output_file, "r", encoding="utf-8-sig") as f:
+        with open(output_file, "r", encoding="utf-8") as f:
             content = f.read()
-            print(f"\n📄 展开版邻接表内容:\n{content}")
+            print(f"\n📄 标准邻接表内容:\n{content}")
+
+            # 验证格式：每行至少包含用户ID
+            for line in content.strip().split("\n"):
+                parts = line.split()
+                assert len(parts) >= 1
+                assert int(parts[0]) > 0
+
+        print(f"\n📂 文件位置: {output_file}")
+
+    def test_export_adjacency_table_text(self, graph, tmp_path):
+        """测试导出纯文本带边框表格"""
+        print_test_title("测试纯文本表格导出")
+
+        output_file = tmp_path / "export_adj_table.txt"
+
+        result = graph.export_adjacency_table_text(str(output_file))
+        assert result is True
+
+        assert output_file.exists()
+
+        with open(output_file, "r", encoding="utf-8") as f:
+            content = f.read()
+            print(f"\n📄 纯文本表格内容:\n{content}")
 
             # 验证表头
             assert "用户ID" in content
             assert "姓名" in content
-            assert "好友ID" in content
-            assert "二度人脉ID" in content
-            assert "路径" in content
+            assert "好友列表" in content
+
+            # 验证边框
+            assert "+" in content
+            assert "-" in content
+            assert "|" in content
 
             # 验证数据
             assert "张三" in content
-            assert "李四" in content
-            assert "钱七" in content
-            assert "→" in content
+            assert "2(李四)" in content
 
         print(f"\n📂 文件位置: {output_file}")

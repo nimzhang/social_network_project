@@ -939,73 +939,107 @@ class SocialGraph:
 
 
 
-    # ========================【新增功能3：数据导出（详细邻接表含路径）】========================
-    # ========================【新增功能3：数据导出（展开版邻接表）】========================
-    def export_adjacency_list_expanded(self, filename: str) -> bool:
+
+
+    # ========================【新增功能3：数据导出】========================
+
+    # 1. 标准邻接表（用于图算法，满足题目要求）
+    def export_adjacency_list(self, filename: str) -> bool:
         """
-        导出展开版邻接表（每行一条关系）
-        格式：用户ID,姓名,兴趣标签,好友ID,好友姓名,二度人脉ID,二度人脉姓名,路径
-        例如：
-            1,张三,编程;篮球;摄影,2,李四,5,钱七,1→2→5
-            1,张三,编程;篮球;摄影,2,李四,9,郑十一,1→2→9
+        导出标准邻接表格式（用于图算法）
+        每行：用户ID 好友ID1 好友ID2 ...
+        示例：1 2 3 6
+        """
+        try:
+            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
+            with open(filename, "w", encoding="utf-8") as f:
+                for uid in self.user_attrs.keys():
+                    if uid in self.blacklist:
+                        continue
+                    friends = self.get_direct_friends(uid)
+                    if friends:
+                        f.write(f"{uid} " + " ".join(str(f) for f in friends) + "\n")
+                    else:
+                        f.write(f"{uid}\n")
+            print(f"✅ 标准邻接表导出成功：{filename}")
+            return True
+        except Exception as e:
+            print(f"❌ 导出标准邻接表失败：{e}")
+            return False
+
+    # 2. 纯文本表格格式（用于人工查看，带边框）
+    def export_adjacency_table_text(self, filename: str) -> bool:
+        """
+        导出纯文本带边框表格
+        包含：用户ID、姓名、兴趣标签、好友列表
+        在记事本中也能整齐显示
         """
         try:
             os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
 
-            with open(filename, "w", encoding="utf-8-sig") as f:
-                # 写入表头
-                f.write("用户ID,姓名,兴趣标签,好友ID,好友姓名,二度人脉ID,二度人脉姓名,路径\n")
+            with open(filename, "w", encoding="utf-8") as f:
+                # 收集所有行数据，先计算每列最大宽度
+                rows = []
+                header = ["用户ID", "姓名", "兴趣标签", "好友列表"]
+                rows.append(header)
 
                 for uid in self.user_attrs.keys():
                     if uid in self.blacklist:
                         continue
 
-                    # 获取用户信息
                     info = self.user_attrs.get(uid)
                     name = info.get("name", "未知") if info else "未知"
                     interests = ";".join(info.get("interests", [])) if info else ""
 
-                    # 获取好友列表（含姓名）
                     friends = self.get_direct_friends(uid)
-
-                    # 获取二度人脉（含路径）
-                    second_degree = self.find_second_degree_with_path(uid, sort_strategy="weight")
-
-                    if not friends:
-                        # 没有好友，输出一行空数据
-                        f.write(f"{uid},{name},{interests},无,无,无,无,无\n")
-                        continue
-
-                    if not second_degree:
-                        # 有好友但没有二度人脉
+                    if friends:
+                        friend_parts = []
                         for fid in friends:
                             finfo = self.user_attrs.get(fid)
                             fname = finfo.get("name", "未知") if finfo else "未知"
-                            f.write(f"{uid},{name},{interests},{fid},{fname},无,无,无\n")
-                        continue
+                            friend_parts.append(f"{fid}({fname})")
+                        friends_str = ", ".join(friend_parts)
+                    else:
+                        friends_str = "无"
 
-                    # 有好友也有二度人脉，展开每条关系
-                    for fid in friends:
-                        finfo = self.user_attrs.get(fid)
-                        fname = finfo.get("name", "未知") if finfo else "未知"
+                    rows.append([str(uid), name, interests, friends_str])
 
-                        # 找到通过这个好友到达的二度人脉
-                        related_second = [s for s in second_degree if s[1] == fid]
+                # 计算每列最大宽度
+                col_widths = []
+                for col_idx in range(len(header)):
+                    max_width = max(len(str(row[col_idx])) for row in rows)
+                    col_widths.append(max_width + 2)
 
-                        if related_second:
-                            for sec_uid, mid_uid, path in related_second:
-                                sec_info = self.user_attrs.get(sec_uid)
-                                sec_name = sec_info.get("name", "未知") if sec_info else "未知"
-                                path_str = "→".join(str(p) for p in path)
-                                f.write(f"{uid},{name},{interests},{fid},{fname},{sec_uid},{sec_name},{path_str}\n")
+                def draw_line():
+                    f.write("+" + "+".join("-" * w for w in col_widths) + "+\n")
+
+                def write_row(cells):
+                    row = "|"
+                    for i, cell in enumerate(cells):
+                        row += str(cell).center(col_widths[i]) + "|"
+                    f.write(row + "\n")
+
+                def write_row_left(cells):
+                    row = "|"
+                    for i, cell in enumerate(cells):
+                        if i == 3:
+                            row += str(cell).ljust(col_widths[i]) + "|"
                         else:
-                            # 好友没有对应的二度人脉
-                            f.write(f"{uid},{name},{interests},{fid},{fname},无,无,无\n")
+                            row += str(cell).center(col_widths[i]) + "|"
+                    f.write(row + "\n")
 
-            print(f"✅ 展开版邻接表导出成功：{filename}")
+                draw_line()
+                write_row(header)
+                draw_line()
+
+                for row in rows[1:]:
+                    write_row_left(row)
+                    draw_line()
+
+            print(f"✅ 纯文本表格导出成功：{filename}")
             return True
         except Exception as e:
-            print(f"❌ 导出展开版邻接表失败：{e}")
+            print(f"❌ 导出纯文本表格失败：{e}")
             return False
 # ========================【算法代码结束】========================
 
