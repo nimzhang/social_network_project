@@ -522,6 +522,7 @@ class SocialGraph:
         return dict(layer_map)
 
     # ===================== 【重构优化2：二度人脉择优路径，支持两种排序策略】 =====================
+    # ===================== 【重构优化2：二度人脉择优路径，支持两种排序策略】 =====================
     def find_second_degree_with_path(
             self,
             user_id: int,
@@ -533,14 +534,16 @@ class SocialGraph:
         :param sort_strategy: 择优策略
             "weight": 按中间人好友总权重降序（亲密度最高中间人优先）
             "interest": 按中间人共同兴趣数量降序（兴趣契合优先）
+            非法值自动降级为 "weight" 默认策略
         返回格式：[(二度用户ID, 最优中间好友ID, 完整路径)]
-        约束规则：
-        1. 排除自己、所有一度好友、黑名单用户
-        2. 同一个二度用户仅保留最优1条路径
-        3. 路径固定长度=3：[起点,中间人,二度好友]
         """
-        if self.user_attrs.get(user_id) is None:
+        if sort_strategy not in ["weight", "interest"]:
+            print(f"⚠️ 警告：未知排序策略 '{sort_strategy}'，已自动降级为 'weight'")
+            sort_strategy = "weight"
+
+        if self.user_attrs.get(user_id) is None:  # ← 这是原有代码
             return []
+
 
         first_friends = set(self.get_direct_friends(user_id))
         second_candidates = defaultdict(list)  # key:二度好友ID, value: [(中间人ID,路径)]
@@ -933,6 +936,98 @@ class SocialGraph:
         t5 = time.perf_counter() - start
         print(f"5. 全网人脉层级计算(可视化用)耗时: {t5:.4f} s")
         print("========================================\n")
+
+        # ========================【算法代码结束】========================  ← 这一行之前的代码
+
+        # ========================【新增功能3：数据导出】========================
+
+    def export_relationships_to_csv(self, filename: str) -> bool:
+        """
+        导出全部好友关系到CSV文件
+        格式：用户ID1,用户ID2,权重
+        返回True表示导出成功，False表示失败
+        """
+        try:
+            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
+
+            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["用户ID1", "用户ID2", "权重"])
+
+                for (u1, u2), weight in self.edge_weights.items():
+                    writer.writerow([u1, u2, weight])
+
+            print(f"✅ 好友关系导出成功：{filename}，共导出 {self.edge_weights.size} 条关系")
+            return True
+        except Exception as e:
+            print(f"❌ 导出好友关系失败：{e}")
+            return False
+
+    def export_users_to_csv(self, filename: str) -> bool:
+        """
+        导出全部用户数据到CSV文件
+        格式：用户ID,姓名,兴趣标签（分号分隔）
+        返回True表示导出成功，False表示失败
+        """
+        try:
+            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
+
+            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["用户ID", "姓名", "兴趣标签"])
+
+                for uid in self.user_attrs.keys():
+                    info = self.user_attrs.get(uid)
+                    if info:
+                        interests_str = ";".join(info.get("interests", []))
+                        writer.writerow([uid, info.get("name", ""), interests_str])
+
+            print(f"✅ 用户数据导出成功：{filename}，共导出 {self.user_attrs.size} 个用户")
+            return True
+        except Exception as e:
+            print(f"❌ 导出用户数据失败：{e}")
+            return False
+
+    def export_second_degree_to_csv(self, user_id: int, filename: str, sort_strategy: str = "weight") -> bool:
+        """
+        导出指定用户的二度人脉到CSV文件
+        格式：二度用户ID,二度用户姓名,二度用户兴趣,中间人ID,中间人姓名,路径
+        """
+        try:
+            if self.user_attrs.get(user_id) is None:
+                print(f"❌ 用户 {user_id} 不存在，无法导出二度人脉")
+                return False
+
+            second_degree_list = self.find_second_degree_with_path(user_id, sort_strategy)
+
+            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else ".", exist_ok=True)
+
+            with open(filename, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["二度用户ID", "二度用户姓名", "二度用户兴趣", "中间人ID", "中间人姓名", "路径"])
+
+                if not second_degree_list:
+                    print(f"⚠️ 用户 {user_id} 没有二度人脉可导出")
+                    return True
+
+                for sec_uid, mid_uid, path in second_degree_list:
+                    sec_info = self.user_attrs.get(sec_uid)
+                    mid_info = self.user_attrs.get(mid_uid)
+
+                    sec_name = sec_info.get("name", "未知") if sec_info else "未知"
+                    sec_interests = ";".join(sec_info.get("interests", [])) if sec_info else ""
+                    mid_name = mid_info.get("name", "未知") if mid_info else "未知"
+
+                    path_str = "→".join(str(p) for p in path)
+                    writer.writerow([sec_uid, sec_name, sec_interests, mid_uid, mid_name, path_str])
+
+            print(f"✅ 二度人脉导出成功：{filename}，共导出 {len(second_degree_list)} 条二度人脉")
+            return True
+        except Exception as e:
+            print(f"❌ 导出二度人脉失败：{e}")
+            return False
+
+    # ========================【算法代码结束】========================  ← 这一行在这三个方法之后
 # ========================【算法代码结束】========================
 
 # 1. 定义顶层main函数
