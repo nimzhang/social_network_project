@@ -17,7 +17,7 @@ from typing import Dict, Set, Tuple, List, Optional, Literal, Any, DefaultDict
     def get_user_degree_layer(self, center_user_id: int) -> Dict[int, int]:
         """
         以中心用户为原点，计算全网所有节点人脉层级，用于可视化颜色区分
-        返回字典：{用户ID: 层级数值}
+        返回字典：{用户ID: 层级 数值}
         层级定义：
             0: 中心用户自己
             1: 一度人脉（直接好友）→ 红色
