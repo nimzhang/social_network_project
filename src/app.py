@@ -14,7 +14,7 @@ from src.social_graph import SocialGraph
 
 # ===================== 全局UI常量配置 =====================
 WIN_TITLE = "社交网络图谱分析系统"  # 程序主窗口标题
-WIN_SIZE = "1000x650"             # 窗口初始宽高
+WIN_SIZE = "1000x700"             # 窗口初始宽高（调高以显示底部状态栏）
 FONT = ("微软雅黑", 10)            # 全局统一文字字体
 # 日志输出文字颜色分类，区分提示/成功/警告/错误
 TAG_COLORS = {
@@ -50,7 +50,7 @@ class SocialNetworkGUI:
         self.root = root
         root.title(WIN_TITLE)
         root.geometry(WIN_SIZE)
-        root.minsize(800, 550)
+        root.minsize(800, 600)
         root.option_add("*Font", FONT)
 
         # MVC Model层实例：自主实现社交图数据结构
@@ -90,21 +90,69 @@ class SocialNetworkGUI:
         self.tree = None
         self.log = None
 
+        # [新增] 进度条状态标志，防止重复显示
+        self._progress_showing = False
+
+        # ========== 使用 grid 布局根窗口，底部留出状态栏 ==========
+        # 根窗口配置：第0行（主界面）可伸缩，第1行（状态栏）固定高度
+        self.root.grid_rowconfigure(0, weight=1)  # 主框架占据所有额外空间
+        self.root.grid_rowconfigure(1, weight=0)  # 状态栏不伸缩
+        self.root.grid_columnconfigure(0, weight=1)
+
+        # 创建主界面框架（包含左右分区）
+        self.main_frame = ttk.Frame(self.root)
+        self.main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
+        # 状态栏框架在底部
+        self.status_frame = ttk.Frame(self.root)
+        self.status_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 10))
+
+        # 创建进度条和状态标签（放置在状态栏）
+        self.progress = ttk.Progressbar(self.status_frame, mode='indeterminate', length=200)
+        self.progress.pack(side=tk.LEFT, padx=5)
+        self.progress.pack_forget()  # 默认隐藏
+
+        self.status_label = ttk.Label(self.status_frame, text="就绪")
+        self.status_label.pack(side=tk.LEFT, padx=5)
+
         # 依次构建菜单栏、布局、快捷键
         self._create_menu()
-        self._build_layout()
+        self._build_layout()          # 内部填充 main_frame
         self._bind_shortcuts()
 
-        # ========== 恢复自动加载默认数据功能 ==========
-        self._async_load_default()
+        # ========== 移除自动加载默认数据功能，改为手动触发 ==========
+
+    # [新增] 显示进度条并强制刷新UI
+    def _show_progress(self, text="加载中..."):
+        """显示不确定进度条并更新状态文字，强制刷新界面"""
+        if self._progress_showing:
+            return  # 防止重复显示
+        self._progress_showing = True
+        self.status_label.config(text=text)
+        self.progress.pack(side=tk.LEFT, padx=5)
+        self.progress.start(10)  # 每隔10ms步进一次
+        # 强制更新界面，确保进度条立即出现
+        self.root.update_idletasks()
+
+    # [新增] 隐藏进度条并强制刷新
+    def _hide_progress(self):
+        """停止并隐藏进度条，重置状态文字，强制刷新"""
+        if not self._progress_showing:
+            return
+        self.progress.stop()
+        self.progress.pack_forget()
+        self.status_label.config(text="就绪")
+        self._progress_showing = False
+        self.root.update_idletasks()
 
     def _create_menu(self):
         """私有方法：创建窗口顶部全局菜单栏，分为四大功能菜单"""
         bar = Menu(self.root)
         # 文件菜单：数据导入、导出、退出
         f = Menu(bar, tearoff=0)
-        for label, cmd in [("加载用户CSV", self._load_user_file), ("加载关系TXT", self._load_rel_file)]:
-            f.add_command(label=label, command=cmd)
+        f.add_command(label="加载默认数据（CSV+TXT）", command=self._load_default_data)
+        f.add_separator()
+        f.add_command(label="加载用户CSV", command=self._load_user_file)
+        f.add_command(label="加载关系TXT", command=self._load_rel_file)
         f.add_separator()
         f.add_command(label="导出邻接表（TXT）", command=self._export_adj_list)
         f.add_command(label="导出纯文本表格（TXT）", command=self._export_adj_table)
@@ -139,16 +187,18 @@ class SocialNetworkGUI:
 
     def _build_layout(self):
         """私有方法：搭建窗口左右分栏布局，左侧滚动操作面板，右侧结果展示"""
-        # 主容器：grid布局划分左右比例
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        main_frame.grid_columnconfigure(0, weight=1)  # 左侧占1份宽度
-        main_frame.grid_columnconfigure(1, weight=3)  # 右侧占3份宽度
-        main_frame.grid_rowconfigure(0, weight=1)
+        # main_frame 已经是 grid 布局，内部用 grid 或 pack 均可，这里继续用 pack 管理左右
+        # 清空 main_frame 可能已有的内容（但刚创建，为空）
+        # 使用 pack 方便，但需注意与 grid 混合使用的问题，这里只用 pack
+        # 定义左右两个 Frame
+        left_frame = ttk.Frame(self.main_frame)
+        right_frame = ttk.Frame(self.main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
         # ---------- 左侧滚动面板容器 ----------
-        left_container = ttk.Frame(main_frame)
-        left_container.grid(row=0, column=0, sticky="nsew")
+        left_container = ttk.Frame(left_frame)
+        left_container.pack(fill=tk.BOTH, expand=True)
         left_container.grid_rowconfigure(0, weight=1)
         left_container.grid_columnconfigure(0, weight=1)
 
@@ -276,15 +326,15 @@ class SocialNetworkGUI:
         for t, c in [("加入", self._add_black), ("移出", self._remove_black), ("清空", self._clear_black)]:
             ttk.Button(r2, text=t, command=c).pack(side="left", expand=True, fill="x", padx=2)
 
-        # 弹性空白区域，将底部按钮挤到窗口下方
+        # 弹性空白区域，将底部按钮挤到下方
         spacer = ttk.Frame(left, height=0)
         spacer.pack(fill="both", expand=True)
 
         ttk.Button(left, text="删除当前用户", command=self._del_user).pack(fill="x", pady=(8, 0))
 
         # ---------- 右侧结果展示区域 ----------
-        right = ttk.Frame(main_frame)
-        right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        right = ttk.Frame(right_frame)
+        right.pack(fill=tk.BOTH, expand=True)
         right.grid_rowconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
         right.grid_columnconfigure(0, weight=1)
@@ -397,86 +447,142 @@ class SocialNetworkGUI:
         """
         return f"{uid}({self.graph.get_user_info(uid)['name']})"
 
-    # ---------------------- 数据加载异步工具 ----------------------
-    def _async_load_default(self):
-        """开启子线程异步加载默认data文件夹数据，防止GUI主线程阻塞卡死"""
-        self._print("正在加载默认数据...", "info")
-        self.root.config(cursor="wait")
-        threading.Thread(target=self._load_worker, daemon=True).start()
-
-    def _load_worker(self):
-        """子线程执行数据加载逻辑，不占用UI渲染线程"""
+    # ---------------------- 手动加载默认数据 ----------------------
+    def _load_default_data(self):
+        """手动加载 data 目录下的默认用户和关系文件"""
         user_path = os.path.join(self.data_dir, "users.csv")
         rel_path = os.path.join(self.data_dir, "relationships.txt")
-        ok_u = self.graph.load_users_from_csv(user_path)
-        ok_r = self.graph.load_relationships_from_txt(rel_path)
-        # 切回主线程更新界面提示
-        self.root.after(0, self._on_load_done, ok_u, ok_r)
+        if not (os.path.exists(user_path) and os.path.exists(rel_path)):
+            messagebox.showerror("错误", "默认数据文件不存在，请检查 data 目录")
+            return
+        self._show_progress("正在加载默认数据...")
+        self.root.config(cursor="wait")
+        threading.Thread(target=self._default_load_worker, args=(user_path, rel_path), daemon=True).start()
 
-    def _on_load_done(self, ok_u, ok_r):
-        """数据加载完成后的UI回调提示"""
+    def _default_load_worker(self, user_path, rel_path):
+        """后台线程加载默认数据"""
+        old_user_count = self.graph.get_total_user()
+        old_rel_count = self.graph.get_total_relation()
+        ok_u = self.graph.load_users_from_csv(user_path)
+        new_user_count = self.graph.get_total_user()
+        ok_r = self.graph.load_relationships_from_txt(rel_path)
+        new_rel_count = self.graph.get_total_relation()
+        self.root.after(0, self._on_default_load_done, ok_u, ok_r,
+                        new_user_count - old_user_count,
+                        new_rel_count - old_rel_count)
+
+    def _on_default_load_done(self, ok_u, ok_r, added_u, added_r):
+        """默认数据加载完成回调"""
+        self._hide_progress()
         self.root.config(cursor="")
         if ok_u and ok_r:
-            self._print("✅ 默认数据加载完成", "success")
+            self._print(f"✅ 默认数据加载完成，新增用户 {added_u} 人，新增关系 {added_r} 条", "success")
         else:
-            self._print("⚠️ 部分数据加载失败，请手动加载", "warning")
+            msgs = []
+            if not ok_u:
+                if added_u == 0:
+                    msgs.append("用户数据未新增（可能已全部存在）")
+                else:
+                    msgs.append("用户数据部分加载失败")
+            if not ok_r:
+                if added_r == 0:
+                    msgs.append("关系数据未新增（可能已全部存在）")
+                else:
+                    msgs.append("关系数据部分加载失败")
+            self._print("⚠️ " + "；".join(msgs), "warning")
+            messagebox.showwarning("加载提示", "默认数据加载完成，但存在以下情况：\n" + "\n".join(msgs))
 
+    # ---------------------- 手动加载用户/关系文件 ----------------------
     def _load_user_file(self):
         """手动弹窗选择CSV用户文件并加载"""
         path = filedialog.askopenfilename(filetypes=[("CSV文件", "*.csv")])
         if not path:
             return
-        if self.graph.load_users_from_csv(path):
-            self._print(f"✅ 用户文件加载: {os.path.basename(path)}", "success")
+        self._show_progress(f"正在加载用户文件: {os.path.basename(path)}")
+        self.root.config(cursor="wait")
+        self.root.after(50, self._do_load_user_file, path)
+
+    def _do_load_user_file(self, path):
+        old_count = self.graph.get_total_user()
+        success = self.graph.load_users_from_csv(path)
+        new_count = self.graph.get_total_user()
+        added = new_count - old_count
+        if success:
+            self._print(f"✅ 用户文件加载完成，新增 {added} 人", "success")
         else:
-            self._print("❌ 用户文件加载失败", "error")
-            messagebox.showerror("失败", "文件格式错误或编码不支持")
+            if added == 0:
+                self._print("⚠️ 未添加新用户，可能数据重复或文件格式错误", "warning")
+                messagebox.showwarning("提示", "未添加新用户，文件中的用户可能已全部存在，或文件格式有误。")
+            else:
+                self._print(f"⚠️ 用户文件部分加载失败，仅新增 {added} 人", "warning")
+                messagebox.showwarning("提示", "部分数据加载失败，请检查日志。")
+        self._hide_progress()
+        self.root.config(cursor="")
 
     def _load_rel_file(self):
-        """手动弹窗选择TXT好友关系文件并加载"""
         path = filedialog.askopenfilename(filetypes=[("TXT文件", "*.txt")])
         if not path:
             return
-        if self.graph.load_relationships_from_txt(path):
-            self._print(f"✅ 关系文件加载: {os.path.basename(path)}", "success")
+        self._show_progress(f"正在加载关系文件: {os.path.basename(path)}")
+        self.root.config(cursor="wait")
+        self.root.after(50, self._do_load_rel_file, path)
+
+    def _do_load_rel_file(self, path):
+        old_count = self.graph.get_total_relation()
+        success = self.graph.load_relationships_from_txt(path)
+        new_count = self.graph.get_total_relation()
+        added = new_count - old_count
+        if success:
+            self._print(f"✅ 关系文件加载完成，新增 {added} 条", "success")
         else:
-            self._print("❌ 关系文件加载失败", "error")
-            messagebox.showerror("失败", "文件格式错误或编码不支持")
+            if added == 0:
+                self._print("⚠️ 未添加新关系，可能数据重复或文件格式错误", "warning")
+                messagebox.showwarning("提示", "未添加新关系，文件中的关系可能已全部存在，或文件格式有误。")
+            else:
+                self._print(f"⚠️ 关系文件部分加载失败，仅新增 {added} 条", "warning")
+                messagebox.showwarning("提示", "部分关系加载失败，请检查日志。")
+        self._hide_progress()
+        self.root.config(cursor="")
 
     # ---------------------- 导出文件功能 ----------------------
     def _export_adj_list(self):
-        """导出标准邻接表文本文件"""
         if self.graph.user_attrs.size == 0:
             messagebox.showwarning("提示", "当前没有用户数据可导出")
             return
         path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("文本文件", "*.txt")], title="导出标准邻接表")
         if not path:
             return
+        self._show_progress("正在导出标准邻接表...")
+        self.root.config(cursor="wait")
         if self.graph.export_adjacency_list(path):
             self._print(f"✅ 标准邻接表已导出: {os.path.basename(path)}", "success")
             messagebox.showinfo("成功", f"标准邻接表导出成功！\n{path}")
         else:
             self._print("❌ 标准邻接表导出失败", "error")
             messagebox.showerror("失败", "导出失败，请检查路径权限")
+        self._hide_progress()
+        self.root.config(cursor="")
 
     def _export_adj_table(self):
-        """导出纯文本表格格式邻接关系"""
         if self.graph.user_attrs.size == 0:
             messagebox.showwarning("提示", "当前没有用户数据可导出")
             return
         path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("文本文件", "*.txt")], title="导出纯文本表格")
         if not path:
             return
+        self._show_progress("正在导出纯文本表格...")
+        self.root.config(cursor="wait")
         if self.graph.export_adjacency_table_text(path):
             self._print(f"✅ 纯文本表格已导出: {os.path.basename(path)}", "success")
             messagebox.showinfo("成功", f"纯文本表格导出成功！\n{path}")
         else:
             self._print("❌ 纯文本表格导出失败", "error")
             messagebox.showerror("失败", "导出失败，请检查路径权限")
+        self._hide_progress()
+        self.root.config(cursor="")
 
     # ---------------------- 核心查询功能绑定方法 ----------------------
     def _confirm_user(self):
-        """确认选中当前操作用户，刷新界面展示用户基础信息"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
@@ -488,19 +594,16 @@ class SocialNetworkGUI:
         self._print(f"已切换查询目标: {self._name(uid)}", "info")
 
     def _get_sort_key(self):
-        """转换下拉框排序文本为底层算法识别标识"""
         mapping = {"按ID升序": "id", "按亲密度降序": "weight", "按共同兴趣降序": "interest"}
         return mapping.get(self.sort_var.get(), "id")
 
     def _query_1(self):
-        """查询一度人脉（用户直接好友）"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
         friends = self.graph.get_direct_friends_with_weight(uid)
         sort_key = self._get_sort_key()
         my_interests = set(self.graph.get_user_info(uid)["interests"])
-        # 根据选中规则排序好友列表
         if sort_key == "id":
             friends.sort(key=lambda x: x[0])
         elif sort_key == "interest":
@@ -508,7 +611,6 @@ class SocialNetworkGUI:
                 fid, _ = item
                 return len(my_interests & set(self.graph.get_user_info(fid)["interests"]))
             friends.sort(key=lambda x: (-common(x), x[0]))
-        # 组装表格展示数据
         self._print(f"═══ {self._name(uid)} 一度人脉（共{len(friends)}人）═══", "title")
         rows = []
         for fid, w in friends:
@@ -519,7 +621,6 @@ class SocialNetworkGUI:
         self._update_table(["用户ID", "姓名", "匹配维度", "兴趣标签"], rows)
 
     def _query_2(self):
-        """基于BFS算法查询二度人脉（好友的好友）"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
@@ -533,7 +634,6 @@ class SocialNetworkGUI:
         self._update_table(["用户ID", "姓名", "中间人", "连通路径"], rows)
 
     def _query_n(self):
-        """自定义N度人脉查询（扩展功能A）"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
@@ -550,12 +650,10 @@ class SocialNetworkGUI:
         self._update_table(["用户ID", "姓名", "人脉度数", "兴趣标签"], rows)
 
     def _calc_dist(self):
-        """计算两用户最短社交距离，切换BFS无权 / Dijkstra加权两种模式"""
         s_ok, start = self._valid_uid(self.uid_var.get())
         e_ok, end = self._valid_uid(self.end_uid_var.get())
         if not (s_ok and e_ok):
             return
-        # 判断是否启用加权模式
         if self.weight_mode.get():
             dist, path = self.graph.get_weighted_shortest_path(start, end)
             mode = "加权模式"
@@ -574,7 +672,6 @@ class SocialNetworkGUI:
         self._update_table(["序号", "途经节点", "", ""], rows)
 
     def _recommend(self):
-        """基于用户兴趣标签智能好友推荐（扩展功能C）"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
@@ -592,7 +689,6 @@ class SocialNetworkGUI:
 
     # ---------------------- 用户/好友管理 ----------------------
     def _add_user(self):
-        """手动新增用户并录入兴趣标签到图结构"""
         try:
             uid = int(self.new_uid_var.get().strip())
             name = self.new_name_var.get().strip()
@@ -602,7 +698,6 @@ class SocialNetworkGUI:
             messagebox.showerror("错误", "ID为正整数且姓名不能为空")
             return
         raw = self.new_inter_var.get().strip()
-        # 校验禁止使用英文/中文逗号分号，统一中文顿号
         wrong_seps = ["：", "；", ":", ";", "，", ","]
         for sep in wrong_seps:
             if sep in raw:
@@ -614,7 +709,6 @@ class SocialNetworkGUI:
             return
         if self.graph.add_user(uid, name, inters):
             self._print(f"✅ 新增用户: {self._name(uid)}", "success")
-            # 清空输入框
             self.new_uid_var.set("")
             self.new_name_var.set("")
             self.new_inter_var.set("")
@@ -623,7 +717,6 @@ class SocialNetworkGUI:
             messagebox.showwarning("提示", "该用户ID已存在")
 
     def _add_friend(self):
-        """建立双向无向好友关系，设置亲密度权重"""
         s_ok, u1 = self._valid_uid(self.uid_var.get())
         t_ok, u2 = self._valid_uid(self.target_uid_var.get())
         if not (s_ok and t_ok):
@@ -640,7 +733,6 @@ class SocialNetworkGUI:
         self.target_uid_var.set("")
 
     def _del_friend(self):
-        """解除双向好友关系"""
         s_ok, u1 = self._valid_uid(self.uid_var.get())
         t_ok, u2 = self._valid_uid(self.target_uid_var.get())
         if not (s_ok and t_ok):
@@ -652,7 +744,6 @@ class SocialNetworkGUI:
         self.target_uid_var.set("")
 
     def _del_user(self):
-        """彻底删除指定用户，同步清除所有关联好友边"""
         ok, uid = self._valid_uid(self.uid_var.get())
         if not ok:
             return
@@ -669,7 +760,6 @@ class SocialNetworkGUI:
 
     # ---------------------- 黑名单功能 ----------------------
     def _add_black(self):
-        """将用户加入黑名单，查询、可视化时自动过滤"""
         ok, uid = self._valid_uid(self.black_uid_var.get())
         if not ok:
             return
@@ -678,7 +768,6 @@ class SocialNetworkGUI:
             self.black_uid_var.set("")
 
     def _remove_black(self):
-        """将用户移出黑名单，恢复展示"""
         ok, uid = self._valid_uid(self.black_uid_var.get())
         if not ok:
             return
@@ -689,14 +778,12 @@ class SocialNetworkGUI:
         self.black_uid_var.set("")
 
     def _show_black(self):
-        """查看全部黑名单用户列表"""
         bl = sorted(self.graph.blacklist)
         self._print(f"═══ 黑名单列表（共{len(bl)}人）═══", "title")
         rows = [(uid, self.graph.get_user_info(uid)["name"], "", "") for uid in bl]
         self._update_table(["用户ID", "姓名", "", ""], rows)
 
     def _clear_black(self):
-        """一键清空全部黑名单数据"""
         if not messagebox.askyesno("确认", "确定清空全部黑名单？"):
             return
         self.graph.clear_blacklist()
@@ -704,7 +791,6 @@ class SocialNetworkGUI:
 
     # ---------------------- 图统计分析功能 ----------------------
     def _show_communities(self):
-        """连通社群划分，输出所有独立社交社群"""
         comms = self.graph.find_all_communities()
         self._print("========================================", "title")
         self._print(f"            全网社群划分 共{len(comms)}个", "title")
@@ -717,7 +803,6 @@ class SocialNetworkGUI:
                 self._print("    " + "、".join(chunk), "detail")
 
     def _show_centrality(self):
-        """度中心性排行，按好友数量从高到低排序展示"""
         rank = self.graph.calc_degree_centrality()
         self._print("═══ 用户度中心性排行 ═══", "title")
         rows = [(i, uid, name, f"好友数: {cnt}") for i, (uid, cnt, name) in enumerate(rank, 1)]
@@ -725,7 +810,6 @@ class SocialNetworkGUI:
 
     # ---------------------- 交互式网络图可视化（扩展E） ----------------------
     def _generate_graph(self):
-        """调用PyVis生成HTML交互式社交网络图，支持缩放拖拽"""
         if self.graph.user_attrs.size == 0:
             messagebox.showwarning("提示", "请先加载数据")
             return
@@ -735,7 +819,14 @@ class SocialNetworkGUI:
             self._print("❌ 请安装 pyvis: pip install pyvis", "error")
             messagebox.showerror("错误", "请安装 pyvis 库：pip install pyvis")
             return
+
+        self._show_progress("正在生成网络图...")
+        self.root.config(cursor="wait")
+        self.root.after(100, self._do_generate_graph)
+
+    def _do_generate_graph(self):
         try:
+            from pyvis.network import Network
             net = Network(notebook=False, width="100%", height="750px", directed=False)
             net.set_options("""{"nodes":{"font":{"size":14},"shape":"dot"},"edges":{"smooth":{"type":"continuous"}},"physics":{"barnesHut":{"gravitationalConstant":-8000,"springLength":200}},"interaction":{"hover":true,"zoomView":true,"dragView":true}}""")
             layer_map = {}
@@ -748,12 +839,9 @@ class SocialNetworkGUI:
                 for u, d in layer_map.items():
                     if d <= 2:
                         visible.add(u)
-            # 循环绘制所有用户节点
             for uid, attr in self.graph.user_attrs.items():
-                # 黑名单过滤逻辑
                 if self.hide_black.get() and uid in self.graph.blacklist:
                     continue
-                # 子网络筛选
                 if self.only_subgraph.get() and visible and uid not in visible:
                     continue
                 friend_set = self.graph.graph.get(uid)
@@ -763,7 +851,6 @@ class SocialNetworkGUI:
                 title = f"ID:{uid}\n姓名:{attr['name']}\n好友数:{cnt}\n兴趣:{'、'.join(attr['interests'])}"
                 net.add_node(uid, label=f"{uid}-{attr['name']}", size=size, color=color, title=title)
             added = set()
-            # 循环绘制好友边
             for (u1, u2), w in self.graph.edge_weights.items():
                 if self.hide_black.get() and (u1 in self.graph.blacklist or u2 in self.graph.blacklist):
                     continue
@@ -772,7 +859,6 @@ class SocialNetworkGUI:
                 if (u2, u1) not in added:
                     net.add_edge(u1, u2, width=w * 0.8, title=f"亲密度:{w}", color="#90a4ae")
                     added.add((u1, u2))
-            # 保存HTML并自动打开
             save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "social_network_graph.html")
             net.write_html(save_path)
             webbrowser.open(os.path.abspath(save_path))
@@ -780,6 +866,9 @@ class SocialNetworkGUI:
         except Exception as e:
             self._print(f"❌ 生成失败: {str(e)}", "error")
             messagebox.showerror("失败", str(e))
+        finally:
+            self._hide_progress()
+            self.root.config(cursor="")
 
 # 程序入口启动函数
 if __name__ == "__main__":
