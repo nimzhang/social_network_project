@@ -728,13 +728,22 @@ class TestBlacklistFeatures:
         # 正常路径：1-2-5
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == 2
+        assert path == [1, 2, 5]
 
-        # 将2加入黑名单
+        # 将2加入黑名单（阻塞直接路径）
         graph.add_to_blacklist(2)
 
-        # 路径应被阻塞
+        # 阻塞替代路径：1-3-... 和 1-6-9-5
+        # 将3加入黑名单（阻塞经过3的所有路径）
+        graph.add_to_blacklist(3)
+        # 将6加入黑名单（阻塞经过6的路径：1-6-9-5）
+        graph.add_to_blacklist(6)
+
+        # 现在1的好友中，2和3都被阻塞，只剩下6也被阻塞
+        # 所以1无法到达任何有效好友，路径被完全阻塞
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == -1
+        assert path == []
 
         print("✅ test_blacklist_affects_shortest_path：黑名单影响最短路径验证通过")
 
@@ -884,9 +893,13 @@ class TestDataConsistency:
 
     def test_edge_weight_consistency(self, graph):
         """边权重一致性测试"""
+        # 【修复】先添加用户，再建立好友关系
+        # 用户11可能已存在，使用更安全的添加方式
+        if graph.user_attrs.get(11) is None:
+            graph.add_user(11, "测试用户", ["测试"])
+
         # 添加边时应更新权重
         graph.add_friendship(1, 11, weight=5)
-        graph.add_user(11, "测试用户", ["测试"])
 
         edge_key = (1, 11)
         assert graph.edge_weights[edge_key] == 5
