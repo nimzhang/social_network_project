@@ -1,14 +1,21 @@
+"""
+社交网络图数据结构与算法实现
+包含：自研哈希表、集合、小顶堆、社交网络图算法等
+"""
+
 from collections import defaultdict, deque
 import csv
 import os
 import random
 import time
-from typing import Dict, Set, Tuple, List, Optional, Literal
+from typing import Dict, Set, Tuple, List, Optional, Literal, Any, DefaultDict
 
 
 # ========================【数据结构代码开始】========================
 # 1. 自主实现哈希表，链地址法，带动态扩容、兼容[]索引语法
 class HashTable:
+    """自研哈希表实现，使用链地址法处理冲突，支持动态扩容"""
+
     # 哈希表构造方法，初始化容量、负载因子、元素计数、哈希桶数组
     def __init__(self, initial_capacity=100, load_factor=0.7):
         self.capacity = initial_capacity
@@ -46,13 +53,14 @@ class HashTable:
         self.buckets[idx].append((key, value))
         self.size += 1
 
-    # 根据key查找对应value，无匹配返回None
-    def get(self, key):
+    # 根据key查找对应value，支持自定义默认值
+    def get(self, key, default=None):
+        """获取key对应的value，不存在返回default"""
         idx = self._hash(key)
         for k, v in self.buckets[idx]:
             if k == key:
                 return v
-        return None
+        return default
 
     # 根据key删除键值对，删除成功返回True，key不存在返回False
     def remove(self, key):
@@ -75,9 +83,13 @@ class HashTable:
     def __setitem__(self, key, value):
         self.put(key, value)
 
-    # 重载in运算符，判断key是否存在哈希表中
+    # 重载in运算符，判断key是否存在哈希表中（修复：直接检查键是否存在）
     def __contains__(self, key):
-        return self.get(key) is not None
+        idx = self._hash(key)
+        for k, v in self.buckets[idx]:
+            if k == key:
+                return True
+        return False
 
     # 返回哈希表全部键值对列表
     def items(self):
@@ -98,13 +110,21 @@ class HashTable:
     def __delitem__(self, key):
         self.remove(key)
 
-    # 在 HashTable 类中添加 __len__ 方法
+    # 返回哈希表存储的元素总数
     def __len__(self):
-        """返回哈希表存储的元素总数，支持 len() 函数"""
         return self.size
 
-# 新增：自研集合SimpleSet，完全替代原生set，底层基于HashTable实现
+    def __repr__(self):
+        return f"HashTable({self.items()})"
+
+    def __str__(self):
+        return str(self.items())
+
+
+# 自研集合SimpleSet，完全替代原生set，底层基于HashTable实现
 class SimpleSet:
+    """自研集合实现，底层基于HashTable，完全替代原生set"""
+
     # 集合初始化，依托自研哈希表存储集合元素
     def __init__(self):
         self._table = HashTable()
@@ -121,23 +141,25 @@ class SimpleSet:
     def __contains__(self, val):
         return val in self._table
 
-    # 重载迭代器，支持for循环遍历集合所有元素
+    # 重载迭代器，支持for循环遍历集合所有元素（修复：返回副本避免并发修改问题）
     def __iter__(self):
-        for k, _ in self._table.items():
+        items = list(self._table.items())
+        for k, _ in items:
             yield k
 
     # 重载len，获取集合内元素总数量
     def __len__(self):
-        return len(self._table.keys())
-
-    # 在 SimpleSet 类中添加 __len__ 方法 (如果还没有的话)
-    def __len__(self):
-        """返回集合元素总数"""
         return len(self._table)
+
+    def __repr__(self):
+        items = list(self._table.items())
+        return f"SimpleSet({[k for k, _ in items]})"
 
 
 # 2. 自主实现小顶堆，完全弃用heapq库，手写堆上浮下沉逻辑
 class MinHeap:
+    """自研小顶堆实现，完全替代heapq"""
+
     # 初始化堆存储数组
     def __init__(self):
         self.heap = []
@@ -189,11 +211,27 @@ class MinHeap:
             self._sift_down(0)
         return top_data
 
+    # 查看堆顶元素但不弹出
+    def peek(self):
+        """查看堆顶元素，不弹出"""
+        if not self.heap:
+            return None
+        return self.heap[0]
+
     # 返回堆当前存储元素总数
     def size(self):
         return len(self.heap)
 
+    def __len__(self):
+        return len(self.heap)
+
+    def __bool__(self):
+        return bool(self.heap)
+
+
 class SocialGraph:
+    """社交网络图核心类，包含所有图算法和社交功能"""
+
     def __init__(self):
         """初始化社交网络图核心数据，全部自研容器"""
         # 邻接表外层哈希表，value为存储好友的SimpleSet，兼容graph[uid]写法
@@ -217,31 +255,31 @@ class SocialGraph:
         return friend_set
 
     # ===================== 黑名单全套接口（扩展A 完整实现） =====================
-    # 将合法用户加入黑名单，用户不存在返回False
     def add_to_blacklist(self, user_id: int) -> bool:
+        """将合法用户加入黑名单，用户不存在返回False"""
         if self.user_attrs.get(user_id) is None:
             return False
         self.blacklist.add(user_id)
         return True
 
-    # 从黑名单移除用户，移除成功返回True，不存在返回False
     def remove_from_blacklist(self, user_id: int) -> bool:
+        """从黑名单移除用户，移除成功返回True，不存在返回False"""
         if user_id in self.blacklist:
             self.blacklist.remove(user_id)
             return True
         return False
 
-    # 判断指定用户是否在黑名单内
     def is_in_blacklist(self, user_id: int) -> bool:
+        """判断指定用户是否在黑名单内"""
         return user_id in self.blacklist
 
-    # 清空黑名单全部内容
     def clear_blacklist(self) -> None:
+        """清空黑名单全部内容"""
         self.blacklist.clear()
 
     # ===================== 删除好友、删除用户 =====================
-    # 双向解除两名用户好友关系，同步删除边权重记录
     def delete_friendship(self, user1: int, user2: int) -> bool:
+        """双向解除两名用户好友关系，同步删除边权重记录"""
         # 校验两名用户是否都存在
         if self.user_attrs.get(user1) is None or self.user_attrs.get(user2) is None:
             return False
@@ -258,8 +296,8 @@ class SocialGraph:
         self.edge_weights.remove(edge_key)
         return True
 
-    # 彻底删除单个用户，清理好友连线、用户信息、兴趣索引、黑名单缓存
     def delete_user(self, user_id: int) -> bool:
+        """彻底删除单个用户，清理好友连线、用户信息、兴趣索引、黑名单缓存"""
         # 校验用户是否存在
         if self.user_attrs.get(user_id) is None:
             return False
@@ -282,7 +320,6 @@ class SocialGraph:
                     uid_list = self.interest_index.get(tag)
                     if user_id in uid_list:
                         uid_list.remove(user_id)
-                        # 修复：使用interest_index，不是interest
                         self.interest_index.put(tag, uid_list)
             # 遍历清理没有任何用户的空兴趣标签
             empty_tags = []
@@ -296,9 +333,10 @@ class SocialGraph:
         if user_id in self.blacklist:
             self.blacklist.remove(user_id)
         return True
+
     # ===================== 用户、好友增删改查 =====================
-    # 添加新用户，校验ID合法性，录入信息并更新兴趣索引
     def add_user(self, user_id: int, name: str, interests: List[str] = None) -> bool:
+        """添加新用户，校验ID合法性，录入信息并更新兴趣索引"""
         # 用户ID必须是大于0的整数
         if not isinstance(user_id, int) or user_id <= 0:
             raise ValueError(f"用户ID必须为正整数，当前输入：{user_id}")
@@ -316,8 +354,34 @@ class SocialGraph:
         self._update_interest_index(user_id, interests)
         return True
 
-    # 维护兴趣反向索引，将用户ID写入对应兴趣标签的用户列表
+    def update_user_interests(self, user_id: int, new_interests: List[str]) -> bool:
+        """更新用户兴趣，自动维护兴趣索引"""
+        info = self.user_attrs.get(user_id)
+        if info is None:
+            return False
+
+        # 清理旧兴趣索引
+        old_interests = info.get("interests", [])
+        for interest in old_interests:
+            if interest in self.interest_index:
+                uid_list = self.interest_index.get(interest)
+                if user_id in uid_list:
+                    uid_list.remove(user_id)
+                    if uid_list:
+                        self.interest_index.put(interest, uid_list)
+                    else:
+                        del self.interest_index[interest]
+
+        # 更新用户信息
+        info["interests"] = new_interests
+        self.user_attrs.put(user_id, info)
+
+        # 更新新兴趣索引
+        self._update_interest_index(user_id, new_interests)
+        return True
+
     def _update_interest_index(self, user_id: int, interests: List[str]) -> None:
+        """维护兴趣反向索引，将用户ID写入对应兴趣标签的用户列表"""
         # 无兴趣标签直接结束
         if not interests:
             return
@@ -332,8 +396,8 @@ class SocialGraph:
                 uid_list.append(user_id)
                 self.interest_index.put(interest, uid_list)
 
-    # 建立双向好友关系，记录好友亲密度权重
     def add_friendship(self, user1: int, user2: int, weight: int = 1) -> bool:
+        """建立双向好友关系，记录好友亲密度权重"""
         # 校验用户ID为正整数
         if user1 <= 0 or user2 <= 0:
             raise ValueError(f"用户ID必须为正整数，当前输入：{user1}, {user2}")
@@ -356,8 +420,8 @@ class SocialGraph:
         self.edge_weights.put(edge_key, weight)
         return True
 
-    # 读取CSV文件批量导入用户数据，自动适配多文件编码
     def load_users_from_csv(self, filename: str) -> bool:
+        """读取CSV文件批量导入用户数据，自动适配多文件编码"""
         print(f"正在加载用户数据：{filename}")
         # 判断文件是否存在
         if not os.path.exists(filename):
@@ -401,8 +465,8 @@ class SocialGraph:
         print("编码全部失败")
         return False
 
-    # 读取TXT文件批量导入好友关系，适配多编码，支持注释行跳过
     def load_relationships_from_txt(self, filename: str) -> bool:
+        """读取TXT文件批量导入好友关系，适配多编码，支持注释行跳过"""
         if not os.path.exists(filename):
             print(f"文件不存在 {filename}")
             return False
@@ -441,8 +505,8 @@ class SocialGraph:
                 continue
         return False
 
-    # 查询用户直接好友列表，自动过滤黑名单用户，结果升序排列
     def get_direct_friends(self, user_id: int) -> List[int]:
+        """查询用户直接好友列表，自动过滤黑名单用户，结果升序排列"""
         if self.user_attrs.get(user_id) is None:
             print(f"用户{user_id}不存在")
             return []
@@ -453,8 +517,8 @@ class SocialGraph:
         friends.sort()
         return friends
 
-    # 查询好友+对应边权重，按权重降序、好友ID升序排序
     def get_direct_friends_with_weight(self, user_id: int) -> List[Tuple[int, int]]:
+        """查询好友+对应边权重，按权重降序、好友ID升序排序"""
         friend_ids = self.get_direct_friends(user_id)
         res = []
         for fid in friend_ids:
@@ -466,28 +530,30 @@ class SocialGraph:
         res.sort(key=lambda x: (-x[1], x[0]))
         return res
 
-    # 根据用户ID查询用户姓名、兴趣，用户不存在返回默认信息
     def get_user_info(self, user_id: int) -> dict:
+        """根据用户ID查询用户姓名、兴趣，返回副本防止外部修改"""
         info = self.user_attrs.get(user_id)
         if info is None:
             return {"name": "未知用户", "interests": []}
-        return info
+        # 返回深拷贝，防止外部修改影响内部数据
+        return {
+            "name": info.get("name", "未知用户"),
+            "interests": info.get("interests", []).copy()
+        }
 
-    # 统计总用户数：读取用户哈希表的size属性，O(1)获取
     def get_total_user(self) -> int:
-        # 统计总用户数：用户属性哈希表的元素总数
+        """统计总用户数：读取用户哈希表的size属性，O(1)获取"""
         return self.user_attrs.size
 
-    # 统计真实好友关系总数，双向存储求和后除以2去重
     def get_total_relation(self) -> int:
-        # 统计总好友关系，双向存储，总边数/2为真实关系数
+        """统计真实好友关系总数，双向存储求和后除以2去重"""
         total = 0
         for uid in self.graph.keys():
             friend_set = self.graph[uid]
             total += len(friend_set)
         return total // 2
-# ========================【算法代码开始】========================
-        # ======================== 新增功能1：人脉层级计算（可视化配色专用） ========================
+
+    # ======================== 新增功能1：人脉层级计算（可视化配色专用） ========================
     def get_user_degree_layer(self, center_user_id: int) -> Dict[int, int]:
         """
         以中心用户为原点，计算全网所有节点人脉层级，用于可视化颜色区分
@@ -514,7 +580,10 @@ class SocialGraph:
             # 超过2度不再深入遍历，统一归为灰色
             if depth >= 2:
                 continue
-            for neighbor in self.graph[cur_uid]:
+            neighbor_set = self.graph.get(cur_uid)
+            if neighbor_set is None:
+                continue
+            for neighbor in neighbor_set:
                 if neighbor in visited or neighbor in self.blacklist:
                     continue
                 visited.add(neighbor)
@@ -530,7 +599,6 @@ class SocialGraph:
 
         return dict(layer_map)
 
-    # ===================== 【重构优化2：二度人脉择优路径，支持两种排序策略】 =====================
     # ===================== 【重构优化2：二度人脉择优路径，支持两种排序策略】 =====================
     def find_second_degree_with_path(
             self,
@@ -550,9 +618,8 @@ class SocialGraph:
             print(f"⚠️ 警告：未知排序策略 '{sort_strategy}'，已自动降级为 'weight'")
             sort_strategy = "weight"
 
-        if self.user_attrs.get(user_id) is None:  # ← 这是原有代码
+        if self.user_attrs.get(user_id) is None:
             return []
-
 
         first_friends = set(self.get_direct_friends(user_id))
         second_candidates = defaultdict(list)  # key:二度好友ID, value: [(中间人ID,路径)]
@@ -575,7 +642,6 @@ class SocialGraph:
             score_list = []
             for mid_uid, path in mid_path_list:
                 if sort_strategy == "weight":
-                    # 修复：拆分get，不传递第二个默认参数
                     edge_key = (min(user_id, mid_uid), max(user_id, mid_uid))
                     w = self.edge_weights.get(edge_key)
                     score = w if w is not None else 1
@@ -596,7 +662,7 @@ class SocialGraph:
         """
         【核心收拢接口】通用N度人脉查询统一标准方法
         :param user_id: 起始用户ID
-        :param n: 人脉度数（1=一度好友，2=二度好友）
+        :param n: 人脉度数（1=一度好友，2=二度好友），必须为正整数
         :return: 升序N度好友ID列表，自动过滤黑名单
         ✅ 所有GUI层一度、二度、多度人脉查询全部调用本接口
         ✅ GUI不再手写任何BFS遍历逻辑，严格遵循MVC分层
@@ -614,7 +680,10 @@ class SocialGraph:
             # 超过目标度数提前终止遍历（性能优化）
             if depth >= n:
                 continue
-            for neighbor in self.graph[cur_uid]:
+            neighbor_set = self.graph.get(cur_uid)
+            if neighbor_set is None:
+                continue
+            for neighbor in neighbor_set:
                 if neighbor in visited or neighbor in self.blacklist:
                     continue
                 visited.add(neighbor)
@@ -646,7 +715,10 @@ class SocialGraph:
 
         while q:
             cur = q.popleft()
-            for neighbor in self.graph[cur]:
+            neighbor_set = self.graph.get(cur)
+            if neighbor_set is None:
+                continue
+            for neighbor in neighbor_set:
                 # 跳过黑名单、已访问节点
                 if neighbor in self.blacklist or neighbor in prev_node:
                     continue
@@ -664,7 +736,10 @@ class SocialGraph:
         temp = end_uid
         while temp is not None:
             path.append(temp)
-            temp = prev_node[temp]
+            temp = prev_node.get(temp)  # 使用get避免KeyError
+            # 如果temp不是int类型，说明出现问题
+            if temp is not None and not isinstance(temp, int):
+                break
         path.reverse()
         dist = len(path) - 1
         return dist, path
@@ -684,7 +759,7 @@ class SocialGraph:
             return 0, [start_uid]
 
         INF = float('inf')
-        dist: Dict[int, int] = dict()       # 惰性创建：仅存入遍历到的节点
+        dist: Dict[int, int] = dict()  # 惰性创建：仅存入遍历到的节点
         prev_node: Dict[int, Optional[int]] = dict()
         dist[start_uid] = 0
         prev_node[start_uid] = None
@@ -701,7 +776,10 @@ class SocialGraph:
                 continue
 
             # 遍历邻接好友
-            for neighbor in self.graph[cur_uid]:
+            neighbor_set = self.graph.get(cur_uid)
+            if neighbor_set is None:
+                continue
+            for neighbor in neighbor_set:
                 if neighbor in self.blacklist:
                     continue
                 edge_key = (min(cur_uid, neighbor), max(cur_uid, neighbor))
@@ -722,7 +800,9 @@ class SocialGraph:
         tmp = end_uid
         while tmp is not None:
             path.append(tmp)
-            tmp = prev_node[tmp]
+            tmp = prev_node.get(tmp)  # 使用get避免KeyError
+            if tmp is not None and not isinstance(tmp, int):
+                break
         path.reverse()
         return dist[end_uid], path
 
@@ -787,9 +867,13 @@ class SocialGraph:
         # 遍历哈希表全部用户
         all_uids = self.user_attrs.keys()
         for uid in all_uids:
+            friend_set = self.graph.get(uid)
             # 过滤黑名单后的有效好友数
-            valid_friends = [f for f in self.graph[uid] if f not in self.blacklist]
-            friend_count = len(valid_friends)
+            if friend_set is not None:
+                valid_friends = [f for f in friend_set if f not in self.blacklist]
+                friend_count = len(valid_friends)
+            else:
+                friend_count = 0
             uname = self.user_attrs.get(uid)["name"]
             centrality_list.append((uid, friend_count, uname))
         centrality_list.sort(key=lambda x: (-x[1], x[0]))
@@ -810,7 +894,6 @@ class SocialGraph:
                 while q:
                     cur = q.popleft()
                     one_community.append(cur)
-                    # 替换 self.graph[cur]，改用get避免KeyError
                     neighbor_set = self.graph.get(cur)
                     neighbors = list(neighbor_set) if neighbor_set is not None else []
                     for neighbor in neighbors:
@@ -820,6 +903,7 @@ class SocialGraph:
                 one_community.sort()
                 communities.append(one_community)
         return communities
+
     # ===================== 低优扩展B：加权混合推荐完整预留框架 =====================
     def recommend_friends_weight_mix(self, user_id: int, top_n: int = 5) -> List[Tuple[int, str, float, List[str]]]:
         """
@@ -851,7 +935,6 @@ class SocialGraph:
             for mid_friend in self.get_direct_friends(user_id):
                 if cand_uid in self.graph[mid_friend]:
                     key = (min(mid_friend, cand_uid), max(mid_friend, cand_uid))
-                    # 修复此处，删除get第二个参数
                     w = self.edge_weights.get(key)
                     w = w if w is not None else 1
                     total_weight += w
@@ -876,6 +959,7 @@ class SocialGraph:
             res.append((data[1], data[2], s, data[3]))
         res.sort(reverse=True, key=lambda x: x[2])
         return res
+
     # ======================== 新增功能4：大数据量生成 + 性能测试工具（1000用户/5000边） ========================
     def generate_big_test_data(self, user_num: int = 1000, edge_num: int = 5000):
         """
@@ -883,8 +967,13 @@ class SocialGraph:
         :param user_num: 用户总数 默认1000
         :param edge_num: 好友边总数 默认5000
         """
-        # 清空原有数据
-        self.__init__()
+        # 清空原有数据（使用显式重置，避免__init__调用问题）
+        self.graph = HashTable()
+        self.user_attrs = HashTable()
+        self.edge_weights = HashTable()
+        self.interest_index = HashTable()
+        self.blacklist = set()
+
         interest_pool = ["游戏", "阅读", "篮球", "电影", "音乐", "旅行", "美食", "编程", "摄影", "健身"]
 
         # 批量创建用户
@@ -946,13 +1035,8 @@ class SocialGraph:
         print(f"5. 全网人脉层级计算(可视化用)耗时: {t5:.4f} s")
         print("========================================\n")
 
-
-
-
-
     # ========================【新增功能3：数据导出】========================
 
-    # 1. 标准邻接表（用于图算法，满足题目要求）
     def export_adjacency_list(self, filename: str) -> bool:
         """
         导出标准邻接表格式（用于图算法）
@@ -976,7 +1060,6 @@ class SocialGraph:
             print(f"❌ 导出标准邻接表失败：{e}")
             return False
 
-    # 2. 纯文本表格格式（用于人工查看，带边框）
     def export_adjacency_table_text(self, filename: str) -> bool:
         """
         导出纯文本带边框表格
@@ -1050,14 +1133,18 @@ class SocialGraph:
         except Exception as e:
             print(f"❌ 导出纯文本表格失败：{e}")
             return False
+
+
 # ========================【算法代码结束】========================
 
-# 1. 定义顶层main函数
 def main():
     """程序主入口函数，性能演示/整体运行入口"""
-    # 这里放你原本要执行的所有主逻辑代码
-    pass
+    # 示例：创建社交图谱并执行性能测试
+    g = SocialGraph()
+    print("正在生成测试数据...")
+    g.generate_big_test_data(user_num=100, edge_num=300)
+    g.run_performance_test(test_center_id=1)
 
-# 2. 脚本直接运行时调用main
+
 if __name__ == "__main__":
     main()
