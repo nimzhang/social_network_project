@@ -1,7 +1,7 @@
 # pyright: reportGeneralTypeIssues=false
 # type: ignore
 """
-src/app.py：系统GUI界面控制模块
+文件src/app.py：系统GUI界面控制模块
 采用Tkinter开发桌面交互，MVC视图+控制器层，对接自主实现的邻接表、哈希表、BFS/Dijkstra底层
 本模块由小组GUI负责人完成
 """
