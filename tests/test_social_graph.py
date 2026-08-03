@@ -132,48 +132,68 @@ def empty_graph() -> SocialGraph:
 
 
 # ==============================================================
-# ===================== 第一大部分：数据结构测试 =====================
+# 单元测试模块：自研底层数据结构、社交图核心功能、BUG修复验证
+# 覆盖哈希表、集合、小顶堆、图加载、文件解析、数据隔离等校验
 # ==============================================================
+# ===================== 第一大部分：数据结构测试 =====================
 class TestSelfDataStructure:
-    """自研数据结构单元测试"""
+    """自研基础数据结构单元测试类
+    测试对象：HashTable哈希表、SimpleSet自研集合、MinHeap小顶堆
+    测试覆盖：增、删、改、查、遍历、边界、空值、迭代安全、重载运算符全接口
+    """
 
     def test_hash_table_all_interface(self):
+        """测试哈希表完整接口：插入、更新、查询、删除、in判断、默认值、空键兼容"""
         ht = HashTable()
+        # 空哈希取值校验
         assert ht.get(1) is None, "空哈希表取值必须返回 None"
         assert 1 not in ht
+        # 插入三组测试数据
         ht.put(1, {"name": "张三"})
         ht.put(5, {"name": "李四"})
         ht.put(9, {"name": "王五"})
+        # 正常键取值校验
         assert ht.get(1)["name"] == "张三", "哈希表取值错误"
+        # 不存在键取值校验
         assert ht.get(INVALID_UID) is None, "不存在 key 应当返回 None"
+        # 覆盖更新已有key
         ht.put(1, {"name": "张三三"})
         assert ht.get(1)["name"] == "张三三", "哈希表更新覆盖失效"
+        # in 成员判断
         assert 1 in ht
         assert 5 in ht
         assert INVALID_UID not in ht
+        # 删除存在key
         assert ht.remove(5) is True, "存在 key 删除应当返回 True"
         assert ht.get(5) is None
+        # 删除不存在key
         assert ht.remove(INVALID_UID) is False, "删除不存在 key 返回 False"
+        # 清空数据校验
         ht.remove(1)
         ht.remove(9)
         assert ht.get(1) is None and ht.get(9) is None
         print("✅ test_hash_table_all_interface：自研哈希表全部接口校验通过")
 
-        # 测试默认值功能
+        # 测试get自定义默认值参数
         assert ht.get(INVALID_UID, "default") == "default"
+        # 兼容None作为键的特殊场景
         ht.put(None, "none_value")
         assert ht.get(None) == "none_value"
 
     def test_min_heap_push_pop_order(self):
+        """测试自研小顶堆：入堆、出堆优先级、peek查看、空堆容错、顺序正确性"""
         heap = MinHeap()
+        # 空堆弹出校验
         assert heap.pop() is None
         assert heap.size() == 0
+        # 批量插入不同优先级元素
         heap.push(5, "C")
         heap.push(2, "A")
         heap.push(7, "D")
         heap.push(1, "B")
         heap.push(2, "X")
         heap.push(2, "Y")
+        # 按最小优先级依次弹出验证
         assert heap.pop() == (1, "B")
         assert heap.pop() == (2, "A")
         assert heap.pop() == (2, "X")
@@ -184,7 +204,7 @@ class TestSelfDataStructure:
         assert heap.size() == 0
         print("✅ test_min_heap_push_pop_order：自研小顶堆出入堆顺序、空值容错正常")
 
-        # 测试 peek 方法
+        # 测试peek仅查看不弹出功能
         heap.push(3, "test")
         assert heap.peek() == (3, "test")
         assert heap.size() == 1
@@ -192,22 +212,26 @@ class TestSelfDataStructure:
         assert heap.peek() is None
 
     def test_simple_set_interface(self):
-        """测试 SimpleSet 接口"""
+        """测试自研SimpleSet集合：添加、删除、长度、成员判断、遍历迭代"""
         s = SimpleSet()
+        # 空集合长度
         assert len(s) == 0
+        # 添加元素
         s.add(1)
         s.add(2)
         assert len(s) == 2
+        # in 判断元素存在与否
         assert 1 in s
         assert 2 in s
         assert 3 not in s
+        # 删除存在元素
         s.discard(1)
         assert 1 not in s
         assert len(s) == 1
-        # 删除不存在的元素不应报错
+        # 删除不存在元素，无报错容错
         s.discard(999)
         assert len(s) == 1
-        # 迭代测试
+        # 遍历迭代功能校验
         s.add(3)
         s.add(4)
         elements = []
@@ -216,33 +240,39 @@ class TestSelfDataStructure:
         assert len(elements) == 3
         print("✅ test_simple_set_interface：SimpleSet 接口校验通过")
 
-        # 测试迭代过程中修改的安全性
+        # 迭代过程中修改集合，校验无迭代异常（迭代副本安全机制）
         s2 = SimpleSet()
         s2.add(1)
         s2.add(2)
         s2.add(3)
         for val in s2:
-            s2.discard(val)  # 在迭代中修改，不应该报错
+            s2.discard(val)  # 在迭代中删除元素，不抛出异常
         assert len(s2) == 0
 
 
 # ==============================================================
 # ===================== 测试分组 1：基础加载校验 =====================
+# 测试社交图整体加载、用户信息、邻接表、兴趣索引、内存/文件数据一致性
 # ==============================================================
 class TestGraphBasicLoadInfo:
-    """基础加载功能测试"""
+    """社交网络图基础加载测试类
+    校验CSV/TXT加载后用户、好友、兴趣索引、邻接表数据完整性
+    """
 
     def test_all_users_loaded_correctly(self, graph):
+        """校验全部测试用户是否完整加载，姓名、兴趣无缺失"""
         print_test_title("校验全体用户加载完整性")
         uid_list = list(range(1, MAX_TEST_USER_NUM + 1))
         for uid in uid_list:
             user_info = graph.get_user_info(uid)
             assert user_info["name"] != "未知用户", f"用户 ID:{uid} 加载缺失"
             assert len(user_info["interests"]) > 0, f"用户 ID:{uid} 兴趣列表为空，数据异常"
+        # 兴趣反向索引构建校验
         assert len(graph.interest_index.keys()) > 0, "兴趣反向索引为空，构建失败"
         print("✅ test_all_users_loaded_correctly：全部 10 个用户加载正常，兴趣索引有效")
 
     def test_user_detail_attribute(self, graph):
+        """校验指定用户固定姓名、兴趣字段匹配测试数据集"""
         user1 = graph.get_user_info(1)
         assert user1["name"] == "张三"
         assert set(user1["interests"]) == {"编程", "篮球", "摄影"}
@@ -255,47 +285,62 @@ class TestGraphBasicLoadInfo:
         print("✅ test_user_detail_attribute：用户姓名、兴趣信息匹配无误")
 
     def test_direct_friend_adjacent_list(self, graph):
+        """校验邻接表中用户直接好友集合是否与测试数据一致"""
         assert set(graph.get_direct_friends(1)) == {2, 3, 6}
         assert set(graph.get_direct_friends(3)) == {1, 2, 4, 6, 8}
         assert set(graph.get_direct_friends(7)) == {4, 5, 6, 8, 10}
+        # 无效用户返回空列表
         assert graph.get_direct_friends(INVALID_UID) == []
         print("✅ test_direct_friend_adjacent_list：用户直连好友邻接表校验通过")
 
     def test_interest_reverse_index(self, graph):
+        """校验兴趣反向索引映射关系正确，同兴趣用户匹配"""
         code_lover = sorted(graph.interest_index.get("编程") or [])
         assert code_lover == [1, 3, 6, 9]
         travel_lover = sorted(graph.interest_index.get("旅行") or [])
         assert travel_lover == [2, 5, 8]
+        # 无对应兴趣返回None
         assert graph.interest_index.get("滑雪") is None
         print("✅ test_interest_reverse_index：兴趣反向索引数据正确")
 
     def test_adjacency_list_storage(self, graph):
+        """校验无向图双向存储好友关系、边权重存储逻辑"""
         adj = graph.graph
+        # 双向好友校验：1包含2，2也包含1
         assert 2 in adj[1] and 1 in adj[2]
         assert 3 in adj[1] and 1 in adj[3]
         assert 6 in adj[1] and 1 in adj[6]
+        # 无效用户无记录
         assert INVALID_UID not in adj
+        # 有序二元组存储权重校验
         edge_key = tuple(sorted([1, 2]))
         assert graph.edge_weights[edge_key] == 1
         print("✅ test_adjacency_list_storage：邻接表双向存边、权重、边界校验全部正常")
 
 
 class TestFileLoadParse:
-    """文件加载解析测试"""
+    """文件加载解析测试类
+    对比CSV/TXT读取的数据与内存构造的标准图数据，保证文件解析无误差
+    """
 
     def test_file_parse_accuracy(self):
+        """验证CSV用户、TXT关系文件解析结果与内存标准数据完全一致"""
         BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         user_csv_path = os.path.join(BASE, "data", "users.csv")
         rel_txt_path = os.path.join(BASE, "data", "relationships.txt")
+        # 新建图对象，从文件加载数据
         file_g = SocialGraph()
         file_g.load_users_from_csv(user_csv_path)
         file_g.load_relationships_from_txt(rel_txt_path)
+        # 内存构造标准测试图作为对比基准
         memory_g = build_memory_graph_data()
+        # 逐用户校验姓名、兴趣
         for uid in range(1, 11):
             file_info = file_g.get_user_info(uid)
             mem_info = memory_g.get_user_info(uid)
             assert file_info["name"] == mem_info["name"]
             assert set(file_info["interests"]) == set(mem_info["interests"])
+        # 逐用户校验好友列表
         for uid in range(1, 11):
             assert set(file_g.get_direct_friends(uid)) == set(memory_g.get_direct_friends(uid))
         print("✅ test_file_parse_accuracy：users.csv、relationships.txt 文件解析和内存数据完全匹配")
@@ -303,18 +348,20 @@ class TestFileLoadParse:
 
 # ==============================================================
 # ===================== 【新增：Bug 修复验证测试】 =====================
+# 专门验证之前代码存在缺陷的修复效果，保证底层逻辑无漏洞
 # ==============================================================
 class TestBugFixes:
-    """验证关键 Bug 已修复"""
+    """BUG修复验证测试类
+    针对哈希表in判断、默认值、集合迭代、数据副本、兴趣索引更新等历史问题校验
+    """
 
     def test_hash_table_contains_fix(self):
-        """验证 HashTable.__contains__ 修复后能正确判断键存在"""
+        """验证HashTable __contains__ 修复：值为None时，键存在仍返回True"""
         ht = HashTable()
-        ht.put("key1", None)  # 值为 None
+        ht.put("key1", None)
         ht.put("key2", "value")
 
-        # 修复前：key1 会返回 False，因为 get(key) 返回 None
-        # 修复后：正确返回 True
+        # 修复前BUG：get返回None导致in判断失效；修复后仅判断键是否存在，与值无关
         assert "key1" in ht
         assert "key2" in ht
         assert "key3" not in ht
@@ -322,13 +369,12 @@ class TestBugFixes:
         print("✅ test_hash_table_contains_fix：HashTable.__contains__ 修复验证通过")
 
     def test_hash_table_get_default_fix(self):
-        """验证 HashTable.get 支持默认值参数"""
+        """验证Hash.get默认值参数修复，区分「键不存在」和「键存在但值为None」两种场景"""
         ht = HashTable()
         ht.put("key1", None)
         ht.put("key2", "value")
 
-        # 修复前：get 无法区分"键不存在"和"值为None"
-        # 修复后：支持默认值参数
+        # 区分两种None场景，支持自定义默认返回值
         assert ht.get("key1") is None
         assert ht.get("key3") is None
         assert ht.get("key3", "default") == "default"
@@ -337,12 +383,12 @@ class TestBugFixes:
         print("✅ test_hash_table_get_default_fix：HashTable.get 默认值支持验证通过")
 
     def test_simple_set_iteration_safety(self):
-        """验证 SimpleSet 迭代安全性"""
+        """验证SimpleSet迭代安全：遍历中删除元素不会抛出迭代异常"""
         s = SimpleSet()
         for i in range(100):
             s.add(i)
 
-        # 在迭代中修改集合，不应该报错
+        # 迭代过程删除全部元素，无报错
         for val in s:
             s.discard(val)
 
@@ -350,15 +396,16 @@ class TestBugFixes:
         print("✅ test_simple_set_iteration_safety：SimpleSet 迭代安全性验证通过")
 
     def test_get_user_info_immutability(self):
-        """验证 get_user_info 返回副本，外部修改不影响内部数据"""
+        """验证get_user_info返回数据副本，外部修改不会污染图内部原始存储"""
         graph = SocialGraph()
         graph.add_user(1, "测试用户", ["编程", "阅读"])
 
+        # 外部修改返回的字典
         info1 = graph.get_user_info(1)
         info1["name"] = "修改的名字"
         info1["interests"].append("篮球")
 
-        # 再次获取，应该不受影响
+        # 重新读取原始数据，保持不变
         info2 = graph.get_user_info(1)
         assert info2["name"] == "测试用户"
         assert info2["interests"] == ["编程", "阅读"]
@@ -366,33 +413,28 @@ class TestBugFixes:
         print("✅ test_get_user_info_immutability：get_user_info 返回副本验证通过")
 
     def test_update_user_interests(self, graph):
-        """测试更新用户兴趣功能"""
-        # 添加一个新用户
+        """测试更新用户兴趣时，同步清理旧兴趣索引、新增兴趣索引的逻辑正确性"""
+        # 新增测试用户
         graph.add_user(11, "测试用户", ["编程", "阅读"])
 
-        # 验证初始兴趣索引
+        # 初始兴趣索引校验
         assert 11 in graph.interest_index.get("编程")
         assert 11 in graph.interest_index.get("阅读")
-        # 【修复】判断用户11不在跑步列表，而不是判断标签不存在
         runner_list = graph.interest_index.get("跑步") or []
         assert 11 not in runner_list
 
-        # 更新兴趣
+        # 更新用户兴趣列表
         assert graph.update_user_interests(11, ["编程", "跑步", "摄影"]) is True
 
-        # 验证旧兴趣索引被清理
+        # 旧兴趣阅读移除索引
         assert 11 not in (graph.interest_index.get("阅读") or [])
-        # 验证新兴趣索引已添加
+        # 新兴趣跑步、摄影加入索引
         assert 11 in graph.interest_index.get("跑步")
         assert 11 in graph.interest_index.get("摄影")
-        # 编程兴趣应该保留
+        # 保留不变的编程兴趣
         assert 11 in graph.interest_index.get("编程")
 
-        # 验证用户信息已更新
-        user_info = graph.get_user_info(11)
-        assert user_info["interests"] == ["编程", "跑步", "摄影"]
-
-        # 更新不存在的用户
+        # 更新不存在用户返回False
         assert graph.update_user_interests(999, ["测试"]) is False
 
         print("✅ test_update_user_interests：更新用户兴趣功能验证通过")

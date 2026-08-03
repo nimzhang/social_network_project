@@ -1,8 +1,3 @@
-"""
-社交网络图数据结构与算法实现
-包含：自研哈希表、集合、小顶堆、社交网络图算法等
-"""
-
 from collections import defaultdict, deque
 import csv
 import os
@@ -10,80 +5,95 @@ import random
 import time
 from typing import Dict, Set, Tuple, List, Optional, Literal, Any, DefaultDict
 
-
-# ========================【数据结构代码开始】========================
-# 1. 自主实现哈希表，链地址法，带动态扩容、兼容[]索引语法
+"""
+社交网络图数据结构与算法实现
+课程设计核心底层模块
+自研基础容器：链地址哈希表、基于哈希的集合、手写小顶堆
+上层容器：无向加权图SocialGraph
+包含功能：用户/好友增删、黑名单、CSV/TXT数据加载、一度人脉（基础/加权排序）、用户信息管理、统计接口
+对应任务书基础功能：图建模、哈希表用户存储、数据持久化、一度人脉查询；扩展功能：黑名单、加权好友排序
+"""
+# ========================【底层自研基础数据结构代码开始】========================
+# 1. 自主实现哈希表，链地址法处理哈希冲突，支持动态扩容、[]重载运算符
+# 自主实现哈希表，禁止调用第三方哈希容器，用于存储用户信息、图邻接键值、兴趣索引、边权重
 class HashTable:
-    """自研哈希表实现，使用链地址法处理冲突，支持动态扩容"""
+    """
+    自研链地址法哈希表（课程设计必写底层数据结构）
+    功能：键值存储、自动扩容、增删改查、兼容[]/in/del语法
+    冲突解决：链地址法（每个桶存放列表存储冲突键值对）
+    扩容规则：负载因子超过0.7时容量翻倍，全部数据重新哈希映射
+    时间复杂度：理想O(1)，冲突最坏O(n)
+    """
 
-    # 哈希表构造方法，初始化容量、负载因子、元素计数、哈希桶数组
+    # 哈希表构造方法，初始化桶数组、初始容量、负载因子、元素计数
     def __init__(self, initial_capacity=100, load_factor=0.7):
-        self.capacity = initial_capacity
-        self.load_factor = load_factor
-        self.size = 0
-        self.buckets = [[] for _ in range(self.capacity)]
+        self.capacity = initial_capacity  # 哈希桶初始容量
+        self.load_factor = load_factor    # 负载因子阈值，触发扩容条件
+        self.size = 0                     # 当前存储有效键值对总数
+        self.buckets = [[] for _ in range(self.capacity)]  # 哈希桶数组，每个桶是链表
 
-    # 私有哈希函数，计算key对应哈希桶下标
+    # 私有哈希映射函数：将任意key转为对应桶的下标索引
     def _hash(self, key):
         return hash(key) % self.capacity
 
-    # 哈希表扩容函数：容量翻倍，所有旧数据重新哈希存入新桶
+    # 私有扩容函数：容量翻倍，旧桶全部数据重新哈希存入新桶
     def _resize(self):
-        old_buckets = self.buckets
-        self.capacity *= 2
-        self.buckets = [[] for _ in range(self.capacity)]
-        self.size = 0
-        # 遍历旧哈希桶，将全部键值对重新插入新哈希表
+        old_buckets = self.buckets  # 暂存原始所有桶数据
+        self.capacity *= 2          # 容量翻倍扩容
+        self.buckets = [[] for _ in range(self.capacity)]  # 新建空桶数组
+        self.size = 0               # 重置计数，put会重新统计
+        # 遍历旧桶所有键值对，重新插入新哈希表完成重映射
         for bucket in old_buckets:
             for k, v in bucket:
                 self.put(k, v)
 
-    # 新增/修改键值对，负载因子超限自动触发扩容
+    # 对外插入/更新键值对接口，自动判断是否需要扩容
     def put(self, key, value):
-        # 判断负载是否超标，需要则扩容
+        # 判断当前负载是否超过阈值，超过则执行扩容
         if self.size / self.capacity > self.load_factor:
             self._resize()
-        idx = self._hash(key)
-        # 遍历对应哈希桶，key重复则覆盖value
+        idx = self._hash(key)  # 计算当前key对应桶下标
+        # 遍历当前桶，存在相同key则覆盖value，直接返回
         for index, (k, v) in enumerate(self.buckets[idx]):
             if k == key:
                 self.buckets[idx][index] = (key, value)
                 return
-        # 无重复key，追加键值对，元素总数+1
+        # 无重复key，新增键值对，总元素计数+1
         self.buckets[idx].append((key, value))
         self.size += 1
 
-    # 根据key查找对应value，支持自定义默认值
+    # 根据key查询对应value，无匹配key返回自定义默认值
     def get(self, key, default=None):
         """获取key对应的value，不存在返回default"""
         idx = self._hash(key)
+        # 遍历目标桶查找目标键
         for k, v in self.buckets[idx]:
             if k == key:
                 return v
         return default
 
-    # 根据key删除键值对，删除成功返回True，key不存在返回False
+    # 根据key删除指定键值对，删除成功返回True，key不存在返回False
     def remove(self, key):
         idx = self._hash(key)
         for index, (k, v) in enumerate(self.buckets[idx]):
             if k == key:
                 del self.buckets[idx][index]
-                self.size -= 1
+                self.size -= 1  # 删除后总元素数量-1
                 return True
         return False
 
-    # 重载[]取值运算符，支持hash_table[key]，不存在则抛出KeyError
+    # 重载[]取值运算符：支持 table[key] 取值，无键抛出KeyError
     def __getitem__(self, key):
         val = self.get(key)
         if val is None:
             raise KeyError(key)
         return val
 
-    # 重载[]赋值运算符，支持hash_table[key]=value，底层调用put
+    # 重载[]赋值运算符：支持 table[key] = value，底层调用put方法
     def __setitem__(self, key, value):
         self.put(key, value)
 
-    # 重载in运算符，判断key是否存在哈希表中（修复：直接检查键是否存在）
+    # 重载in运算符：判断key是否存在哈希表内
     def __contains__(self, key):
         idx = self._hash(key)
         for k, v in self.buckets[idx]:
@@ -91,14 +101,14 @@ class HashTable:
                 return True
         return False
 
-    # 返回哈希表全部键值对列表
+    # 遍历所有桶，返回全部(key,value)键值对列表
     def items(self):
         all_items = []
         for bucket in self.buckets:
             all_items.extend(bucket)
         return all_items
 
-    # 返回哈希表所有key组成的列表
+    # 提取并返回哈希表内所有key组成的列表
     def keys(self):
         key_list = []
         for bucket in self.buckets:
@@ -106,14 +116,15 @@ class HashTable:
                 key_list.append(k)
         return key_list
 
-    # 重载del删除语法，del hash_table[key]
+    # 重载del语法：del table[key] 删除键值对
     def __delitem__(self, key):
         self.remove(key)
 
-    # 返回哈希表存储的元素总数
+    # 重载len()：返回哈希存储元素总数
     def __len__(self):
         return self.size
 
+    # 控制台打印对象字符串形式
     def __repr__(self):
         return f"HashTable({self.items()})"
 
@@ -121,120 +132,154 @@ class HashTable:
         return str(self.items())
 
 
-# 自研集合SimpleSet，完全替代原生set，底层基于HashTable实现
+# 自研集合SimpleSet，底层完全依托自研HashTable实现，不使用系统set
+# 自主实现集合容器，用于存储每个用户的好友ID集合
 class SimpleSet:
-    """自研集合实现，底层基于HashTable，完全替代原生set"""
+    """
+    自研集合容器（底层基于自研HashTable实现，替代原生set）
+    特性：元素自动去重，支持添加、删除、成员判断、遍历、长度获取
+    存储逻辑：集合元素作为哈希表key，value固定为True占位
+    """
 
-    # 集合初始化，依托自研哈希表存储集合元素
+    # 初始化：创建私有哈希表作为底层存储容器
     def __init__(self):
         self._table = HashTable()
 
-    # 向集合添加元素，重复元素自动去重
+    # 添加元素，重复元素自动忽略（哈希表天然去重）
     def add(self, val):
         self._table.put(val, True)
 
-    # 安全删除元素，元素不存在不会报错
+    # 安全删除元素，元素不存在不会抛出异常
     def discard(self, val):
         self._table.remove(val)
 
-    # 重载in，判断元素是否在集合内
+    # 重载in：判断元素是否在集合内
     def __contains__(self, val):
         return val in self._table
 
-    # 重载迭代器，支持for循环遍历集合所有元素（修复：返回副本避免并发修改问题）
+    # 重载迭代器，支持for循环遍历集合所有元素
+    # 先拷贝数据副本，避免遍历过程中集合修改引发异常
     def __iter__(self):
         items = list(self._table.items())
         for k, _ in items:
             yield k
 
-    # 重载len，获取集合内元素总数量
+    # 重载len()：获取集合内存储元素总数量
     def __len__(self):
         return len(self._table)
 
+    # 打印集合可视化字符串
     def __repr__(self):
         items = list(self._table.items())
         return f"SimpleSet({[k for k, _ in items]})"
 
 
-# 2. 自主实现小顶堆，完全弃用heapq库，手写堆上浮下沉逻辑
+# 2. 自主实现小顶堆，完全弃用内置heapq库，手写上浮、下沉调整逻辑
+# 扩展功能Dijkstra加权最短路径专用底层堆结构
 class MinHeap:
-    """自研小顶堆实现，完全替代heapq"""
+    """
+    自研小顶堆（课程设计自主实现堆结构，禁止调用heapq）
+    存储格式：元组(priority, item)，以priority为堆排序依据
+    核心操作：push入堆上浮、pop弹出堆顶下沉、查看堆顶、统计容量
+    适用场景：加权图Dijkstra最短路径算法
+    """
 
-    # 初始化堆存储数组
+    # 初始化空堆数组，堆基于线性列表实现
     def __init__(self):
         self.heap = []
 
-    # 上浮操作：新插入节点向上调整，维护小顶堆特性
+    # 上浮调整：新插入节点向上对比父节点，维护小顶堆特性
     def _sift_up(self, idx):
         while idx > 0:
-            parent_idx = (idx - 1) // 2
-            # 当前节点优先级小于父节点，交换位置
+            parent_idx = (idx - 1) // 2  # 父节点下标计算公式
+            # 当前节点优先级小于父节点，交换两者位置
             if self.heap[idx][0] < self.heap[parent_idx][0]:
                 self.heap[idx], self.heap[parent_idx] = self.heap[parent_idx], self.heap[idx]
                 idx = parent_idx
             else:
-                break
+                break  # 满足堆性质，停止上浮
 
-    # 下沉操作：堆顶节点向下调整，维护小顶堆特性
+    # 下沉调整：堆顶弹出末尾元素后，向下对比左右子节点维护堆特性
     def _sift_down(self, idx):
         total = len(self.heap)
         while True:
-            left = 2 * idx + 1
-            right = 2 * idx + 2
-            min_pos = idx
-            # 寻找当前节点、左孩子、右孩子中优先级最小的位置
+            left = 2 * idx + 1   # 左孩子下标
+            right = 2 * idx + 2  # 右孩子下标
+            min_pos = idx        # 记录当前最小元素下标
+            # 左孩子存在且优先级更小，更新最小下标
             if left < total and self.heap[left][0] < self.heap[min_pos][0]:
                 min_pos = left
+            # 右孩子存在且优先级更小，更新最小下标
             if right < total and self.heap[right][0] < self.heap[min_pos][0]:
                 min_pos = right
-            # 最小值不是自身，交换并继续下沉
+            # 最小节点不是自身，交换并继续下沉循环
             if min_pos != idx:
                 self.heap[idx], self.heap[min_pos] = self.heap[min_pos], self.heap[idx]
                 idx = min_pos
             else:
-                break
+                break  # 符合堆规则，停止下沉
 
-    # 元素入堆，传入优先级和存储数据，执行上浮
+    # 入堆：传入优先级+存储数据，追加至数组后执行上浮
     def push(self, priority, item):
         self.heap.append((priority, item))
         self._sift_up(len(self.heap) - 1)
 
-    # 弹出堆顶最小优先级元素，空堆返回None
+    # 弹出堆顶最小元素；堆为空返回None
     def pop(self):
         if not self.heap:
             return None
-        top_data = self.heap[0]
-        last_node = self.heap.pop()
-        # 堆不为空则将末尾节点放堆顶，执行下沉
+        top_data = self.heap[0]  # 暂存堆顶最小元素
+        last_node = self.heap.pop()  # 移除数组最后一个元素
+        # 堆内还有元素，将末尾节点放到堆顶，执行下沉调整
         if self.heap:
             self.heap[0] = last_node
             self._sift_down(0)
         return top_data
 
-    # 查看堆顶元素但不弹出
+    # 仅查看堆顶元素，不弹出
     def peek(self):
         """查看堆顶元素，不弹出"""
         if not self.heap:
             return None
         return self.heap[0]
 
-    # 返回堆当前存储元素总数
+    # 返回当前堆存储元素个数
     def size(self):
         return len(self.heap)
 
+    # 重载len()获取堆大小
     def __len__(self):
         return len(self.heap)
 
+    # 布尔判断：堆非空返回True
     def __bool__(self):
         return bool(self.heap)
 
+# ========================【底层自研基础数据结构代码结束】========================
 
+
+# ========================【社交无向加权图 上层封装类】========================
+# 对应课设基础功能1：自主实现无向图邻接表结构
+# 整合自研HashTable、SimpleSet实现图存储；提供用户、好友、文件加载、人脉查询全套业务接口
 class SocialGraph:
-    """社交网络图核心类，包含所有图算法和社交功能"""
+    """
+    社交网络无向加权图类（课程设计核心模型层ADT）
+    基于自研HashTable、SimpleSet搭建邻接表、用户存储、兴趣索引、边权重
+    覆盖基础功能：图建模、用户/好友增删、CSV/TXT数据加载、一度人脉查询、用户信息哈希存储
+    扩展功能：黑名单过滤、加权好友亲密度排序、兴趣反向索引、用户/关系统计
+    数据说明：无向图双向存储好友；边统一用(小ID,大ID)作为键避免重复权重存储
+    """
 
     def __init__(self):
-        """初始化社交网络图核心数据，全部自研容器"""
-        # 邻接表外层哈希表，value为存储好友的SimpleSet，兼容graph[uid]写法
+        """
+        图初始化：全部使用自研底层数据，仅黑名单使用原生Set
+        self.graph：邻接表 HashTable<用户ID, SimpleSet<好友ID>>
+        self.user_attrs：用户信息哈希表 HashTable<用户ID, {姓名,兴趣}>
+        self.edge_weights：边权重哈希表 HashTable<(小ID,大ID), 亲密度>
+        self.interest_index：兴趣反向索引，用于兴趣推荐扩展功能
+        self.blacklist：黑名单缓存，查询人脉时自动过滤该批用户
+        """
+        # 邻接表外层哈希表，value为自研好友集合
         self.graph: HashTable = HashTable()
         # 存储所有用户基础信息（姓名、兴趣）的哈希表
         self.user_attrs = HashTable()
