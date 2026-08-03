@@ -98,6 +98,10 @@ class HashTable:
     def __delitem__(self, key):
         self.remove(key)
 
+    # 在 HashTable 类中添加 __len__ 方法
+    def __len__(self):
+        """返回哈希表存储的元素总数，支持 len() 函数"""
+        return self.size
 
 # 新增：自研集合SimpleSet，完全替代原生set，底层基于HashTable实现
 class SimpleSet:
@@ -125,6 +129,11 @@ class SimpleSet:
     # 重载len，获取集合内元素总数量
     def __len__(self):
         return len(self._table.keys())
+
+    # 在 SimpleSet 类中添加 __len__ 方法 (如果还没有的话)
+    def __len__(self):
+        """返回集合元素总数"""
+        return len(self._table)
 
 
 # 2. 自主实现小顶堆，完全弃用heapq库，手写堆上浮下沉逻辑
