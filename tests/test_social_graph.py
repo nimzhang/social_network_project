@@ -373,7 +373,9 @@ class TestBugFixes:
         # 验证初始兴趣索引
         assert 11 in graph.interest_index.get("编程")
         assert 11 in graph.interest_index.get("阅读")
-        assert "跑步" not in graph.interest_index
+        # 【修复】判断用户11不在跑步列表，而不是判断标签不存在
+        runner_list = graph.interest_index.get("跑步") or []
+        assert 11 not in runner_list
 
         # 更新兴趣
         assert graph.update_user_interests(11, ["编程", "跑步", "摄影"]) is True
@@ -394,8 +396,6 @@ class TestBugFixes:
         assert graph.update_user_interests(999, ["测试"]) is False
 
         print("✅ test_update_user_interests：更新用户兴趣功能验证通过")
-
-
 # ==============================================================
 # ===================== 【第二大部分：算法负责全量代码】 =====================
 # 覆盖：上层业务增删改、全部图算法、推荐、黑名单、边界容错
