@@ -450,7 +450,7 @@ class TestUserFriendOperate:
         """重复添加同一好友，无冗余边，无报错"""
         # 原本已是好友
         assert 2 in graph.get_direct_friends(1)
-        # 重复添加多次
+        # 重复添加多次（幂等操作）
         for _ in range(3):
             res = graph.add_friendship(1, 2, weight=1)
         # 边不会重复存储，好友列表仅有一个 2
@@ -473,6 +473,7 @@ class TestUserFriendOperate:
 
     def test_delete_friendship_bidirectional(self, graph):
         """双向删除好友关系：双方邻接表、边权重字典同步清除；重复删除返回 false"""
+        #验证好友关系存在
         assert 2 in graph.get_direct_friends(1)
         edge_key = tuple(sorted((1, 2)))
         assert edge_key in graph.edge_weights
@@ -482,8 +483,9 @@ class TestUserFriendOperate:
         assert 2 not in graph.get_direct_friends(1)
         assert 1 not in graph.get_direct_friends(2)
         assert edge_key not in graph.edge_weights
-        # 重复删除、无效用户删除均返回 False
+        # 重复删除返回 False
         assert graph.delete_friendship(1, 2) is False
+        #无效用户删除返回False
         assert graph.delete_friendship(INVALID_UID, 1) is False
         assert graph.delete_friendship(NEGATIVE_UID, 2) is False
         print("✅ test_delete_friendship_bidirectional：双向好友删除逻辑完整")
@@ -503,7 +505,7 @@ class TestUserFriendOperate:
         assert 5 not in travel_data
         # 先拉黑再删（删除自动清黑名单）
         temp_graph.add_to_blacklist(5)
-        # 此时用户已删，再次删除会返回False
+        # 此时用户已删，再次删除会返回False,黑名单自动清理
         assert temp_graph.is_in_blacklist(5) is False
         # 删除不存在用户、负数用户均返回 False
         assert temp_graph.delete_user(INVALID_UID) is False
@@ -517,11 +519,15 @@ class TestCoreAlgorithmAndRecommend:
 
     def test_bfs_unweighted_shortest_path(self, graph):
         """BFS 无权图最短路径计算：可达节点、自身节点、边界全覆盖"""
+        #正常路径测试
+        #用户1到5：1->2->5(距离2）
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == 2
         assert path == [1, 2, 5]
+        #用户1到10：1->6->7->10(距离3）
         dist_10, _ = graph.get_shortest_distance(1, 10)
         assert dist_10 == 3
+        #自身路径测试
         # 起点终点为同一人，距离 0，路径仅自身
         d_self, p_self = graph.get_shortest_distance(5, 5)
         assert d_self == 0 and p_self == [5]
@@ -529,24 +535,31 @@ class TestCoreAlgorithmAndRecommend:
 
     def test_dijkstra_weighted_shortest_path(self, graph):
         """Dijkstra 算法加权最短路径求解"""
+        #加权模式下，路径权重和=边权重和
         total_weight, path = graph.get_weighted_shortest_path(1, 5)
         assert total_weight == 2
         assert path[0] == 1 and path[-1] == 5
+        #自身路径权重为0
         w_self, _ = graph.get_weighted_shortest_path(3, 3)
         assert w_self == 0
         print("✅ test_dijkstra_weighted_shortest_path：Dijkstra 带权路径计算无误")
 
     def test_second_degree_friend_with_path(self, graph):
-        """二度人脉查询，携带完整跳转路径；双排序策略校验 + 非法参数降级容错"""
+        """二度人脉查询，携带完整跳转路径；双排序策略校验 + 非法参数降级容错
+        对应任务书功能4：二度人脉发现，支持展示连接路径
+        对应扩展功能B：多策略切换（按权重排序、按兴趣排序）
+        """
         print_test_title("测试二度人脉两种排序策略")
 
         # 策略1：兴趣排序 interest
         res_interest = graph.find_second_degree_with_path(1, sort_strategy="interest")
         assert len(res_interest) > 0
         for item in res_interest:
+            #（二度用户ID，最优中间好友ID，完整路径）
             assert len(item) == 3
             uid, mid_uid, path_arr = item
             assert path_arr[0] == 1
+            #路径长度为3：【起点，中间人，二度好友】
             assert len(path_arr) == 3
 
         # 策略2：权重排序 weight
@@ -554,11 +567,12 @@ class TestCoreAlgorithmAndRecommend:
         assert len(res_weight) > 0
 
         # 非法排序字段 → 自动降级为 "weight"
+        #对应任务书“支持多策略切换，非法值需有降级处理”
         res_wrong = graph.find_second_degree_with_path(1, sort_strategy="id")
         assert isinstance(res_wrong, list)
         assert len(res_wrong) > 0
 
-        # 降级后与 weight 结果一致
+        # 降级后与 weight 结果一致（证明降级逻辑正确）
         res_wrong = graph.find_second_degree_with_path(1, sort_strategy="id")
         res_weight = graph.find_second_degree_with_path(1, sort_strategy="weight")
         assert len(res_wrong) == len(res_weight)
@@ -566,41 +580,52 @@ class TestCoreAlgorithmAndRecommend:
         print("✅ test_second_degree_friend_with_path：双排序策略、非法参数降级容错校验完成")
 
     def test_n_degree_unified_api(self, graph):
-        """通用 N 度人脉统一接口容错校验：正整数、0、负数度数区分处理"""
-        # 一度好友
+        """通用 N 度人脉统一接口容错校验：正整数、0、负数度数区分处理
+        对应扩展功能A：多度人脉查询（N>=3)
+        对应基础功能3/4：一度/二度人脉查询
+        """
+        # 一度好友查询
         one_deg = graph.find_n_degree_friends(1, 1)
         assert len(one_deg) == 3
         assert set(one_deg) == {2, 3, 6}
-        # 二度好友
+        # 二度好友查询
         two_deg = graph.find_n_degree_friends(1, 2)
         assert len(two_deg) > 0
-        # 非法度数 <= 0 返回空列表
+        # 非法度数 <= 0 返回空列表（异常处理）
         assert graph.find_n_degree_friends(1, 0) == []
         assert graph.find_n_degree_friends(1, -3) == []
         print("✅ test_n_degree_unified_api：N 度人脉通用接口运行正常")
 
     def test_interest_based_recommend_sort(self, graph):
-        """基于兴趣相似度好友推荐：按共同兴趣数量降序排列；排除自身与现有好友"""
+        """基于兴趣相似度好友推荐：按共同兴趣数量降序排列；排除自身与现有好友
+        对应扩展功能C：基于兴趣的智能推荐
+        对应任务书“支持推荐理由展示”要求（返回共同兴趣列表）
+        """
         rec_list = graph.recommend_friends_by_interest(1, top_n=3)
         assert len(rec_list) <= 3
         score_prev = 999
         for uid, name, score, inter_list in rec_list:
-            # 过滤自己和现有好友
+            # 过滤自己和现有好友（不应出现在推荐列表中）
             assert uid not in {1, 2, 3, 6}, "推荐列表不能出现自身和已添加好友"
+            #共同兴趣数量与列表长度一致
             assert score == len(inter_list)
-            # 推荐结果严格降序排序
+            # 推荐结果严格降序排序（评分高的在前）
             assert score <= score_prev
             score_prev = score
         print("✅ test_interest_based_recommend_sort：兴趣推荐规则、降序排序校验通过")
 
     def test_hash_table_interest_index(self):
-        """测试兴趣反向索引哈希表存取、新增、删除逻辑"""
+        """测试兴趣反向索引哈希表存取、新增、删除逻辑
+        对应扩展功能C：兴趣索引是推荐功能的核心数据结构
+        """
         temp_g = build_memory_graph_data()
         hash_index = temp_g.interest_index
+        #确认使用的是自研哈希表
         assert isinstance(hash_index, HashTable)
+        #查询测试
         travel_list = hash_index.get("旅行") or []
         assert sorted(travel_list) == [2, 5, 8]
-        # 新增用户只操作临时图
+        # 新增用户索引更新
         temp_g.add_user(11, "测试", ["徒步", "编程"])
         code_list = hash_index.get("编程") or []
         assert 11 in code_list
@@ -610,45 +635,57 @@ class TestCoreAlgorithmAndRecommend:
         print("✅ test_hash_table_interest_index：兴趣哈希表增、查、缺省逻辑校验通过")
 
     def test_heap_recommend_topk(self, graph):
-        """测试推荐功能底层小根堆 TopK 排序逻辑：降序输出、数量限制生效"""
+        """测试推荐功能底层小根堆 TopK 排序逻辑：降序输出、数量限制生效
+        对应扩展功能C：采用Top-K推荐算法
+        """
         rec_result = graph.recommend_friends_by_interest(1, top_n=4)
         scores = [item[2] for item in rec_result]
         sorted_score = sorted(scores, reverse=True)
+        #返回结果应已是降序排列
         assert scores == sorted_score
+        #数量不超过top_n限制
         assert len(rec_result) <= 4
         print("✅ test_heap_recommend_topk：堆实现 TopK 推荐降序排序、数量限制有效")
 
     def test_mix_weight_recommend(self, graph):
-        """兴趣 + 社交亲密度混合加权推荐"""
+        """兴趣 + 社交亲密度混合加权推荐
+        对应扩展功能B：加群图与优先推荐 + 扩展功能C：兴趣推荐
+        组合推荐评分=共同兴趣数 x 0.6 + 亲密度均值 x 0.4
+        """
         mix_rec = graph.recommend_friends_weight_mix(1, top_n=4)
         assert len(mix_rec) <= 4
         for uid, name, score, inters in mix_rec:
-            # 整数、浮点数都允许
+            # 得分可以是整数、浮点数都允许（混合加权结果）
             assert isinstance(score, (int, float))
+            #排除自身和直接好友
             assert uid not in {1, 2, 3, 6}
         print("✅ test_mix_weight_recommend：混合加权推荐正常返回")
 
     def test_degree_centrality_desc_sort(self, graph):
-        """度中心性计算，好友数量降序排序；校验最大节点度数"""
+        """度中心性计算，好友数量降序排序；校验最大节点度数
+        功能说明：社群分析工具，识别社交网络中的关键人物
+        """
         rank_result = graph.calc_degree_centrality()
-        # 验证排序
+        # 验证排序：好友数量严格排序
         prev_count = 999
         for uid, count, name in rank_result:
             assert count <= prev_count
             prev_count = count
         # 验证最大度数的用户
         top_user = rank_result[0]
-        # 用户3 有最多的好友：1,2,4,6,8 = 5个
+        # 用户3 有最多的好友：1,2,4,6,8 = 5个（对应测试数据）
         assert top_user[1] == 5
         assert top_user[0] == 3
         print("✅ test_degree_centrality_desc_sort：度中心性降序排列正确")
 
     def test_find_all_communities(self, graph):
-        """连通分量划分：所有独立社群都被正确识别"""
+        """连通分量划分：所有独立社群都被正确识别
+        功能说明：用于分析社交网络的群体结构
+        """
         communities = graph.find_all_communities()
         # 测试数据中所有用户都连通，应只有一个社群
         assert len(communities) == 1
-        # 验证包含所有用户
+        # 验证包含所有用户(无遗漏）
         all_users = set()
         for comm in communities:
             all_users.update(comm)
@@ -659,8 +696,11 @@ class TestCoreAlgorithmAndRecommend:
 
 # ==============================================================
 # ===================== 【新增测试分组：数据导出功能测试】 =====================
+#对应任务书建议提交项：性能测试报告、用户操作手册的数据导出功能
 class TestDataExportFeature:
-    """数据导出功能测试"""
+    """数据导出功能测试
+    用于生成社交网络数据的文本快照，便于分析和文档展示
+    """
 
     def test_export_adjacency_list(self, graph, tmp_path):
         """测试导出标准邻接表"""
@@ -668,10 +708,12 @@ class TestDataExportFeature:
 
         output_file = tmp_path / "export_adjacency_list.txt"
 
+        #执行导出
         result = graph.export_adjacency_list(str(output_file))
         assert result is True
         assert output_file.exists()
 
+        #验证导出的文件格式正确
         with open(output_file, "r", encoding="utf-8") as f:
             content = f.read()
             print(f"\n📄 标准邻接表内容:\n{content}")
@@ -690,10 +732,12 @@ class TestDataExportFeature:
 
         output_file = tmp_path / "export_adj_table.txt"
 
+        #执行导出
         result = graph.export_adjacency_table_text(str(output_file))
         assert result is True
         assert output_file.exists()
 
+        #验证导出的文件格式正确
         with open(output_file, "r", encoding="utf-8") as f:
             content = f.read()
             print(f"\n📄 纯文本表格内容:\n{content}")
@@ -708,7 +752,7 @@ class TestDataExportFeature:
             assert "-" in content
             assert "|" in content
 
-            # 验证数据
+            # 验证数据内容
             assert "张三" in content
             assert "2(李四)" in content
 
@@ -729,14 +773,14 @@ class TestBlacklistFeatures:
         # 再次添加同一个用户
         assert graph.add_to_blacklist(2) is True
 
-        # 添加不存在的用户
+        # 添加不存在的用户返回Fasle
         assert graph.add_to_blacklist(999) is False
 
         # 移除黑名单
         assert graph.remove_from_blacklist(2) is True
         assert graph.is_in_blacklist(2) is False
 
-        # 移除不存在的用户
+        # 移除不存在的用户返回False
         assert graph.remove_from_blacklist(999) is False
 
         # 清空黑名单
@@ -767,7 +811,7 @@ class TestBlacklistFeatures:
 
     def test_blacklist_affects_shortest_path(self, graph):
         """验证黑名单影响最短路径"""
-        # 正常路径：1-2-5
+        # 正常路径：1-2-5(距离是2）
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == 2
         assert path == [1, 2, 5]
@@ -800,6 +844,7 @@ class TestLargeData:
         graph = SocialGraph()
         graph.generate_big_test_data(user_num=100, edge_num=200)
 
+        #验证数据量正确
         assert graph.get_total_user() == 100
         assert graph.get_total_relation() == 200
 
@@ -826,20 +871,26 @@ class TestLargeData:
 # ==============================================================
 # ===================== 边界条件测试 =====================
 class TestEdgeCases:
-    """边界条件测试"""
+    """边界条件测试
+    对应任务书：需处理用户ID不存在、同一用户等异常场景
+    """
 
     def test_empty_graph_operations(self, empty_graph):
-        """空图操作测试"""
+        """空图操作测试
+        验证没有任何数据时，所有操作都能正常返回而不崩溃
+        """
+        #空图统计为0
         assert empty_graph.get_total_user() == 0
         assert empty_graph.get_total_relation() == 0
+        #查询不存在的用户返回空列表或默认值
         assert empty_graph.get_direct_friends(1) == []
         assert empty_graph.get_user_info(1) == {"name": "未知用户", "interests": []}
         assert empty_graph.find_n_degree_friends(1, 1) == []
 
-        # 删除不存在的用户
+        # 删除不存在的用户返回False
         assert empty_graph.delete_user(1) is False
 
-        # 删除不存在的好友关系
+        # 删除不存在的好友关系返回False
         assert empty_graph.delete_friendship(1, 2) is False
 
         # 添加用户
@@ -850,21 +901,21 @@ class TestEdgeCases:
 
     def test_invalid_user_operations(self, graph):
         """无效用户操作测试"""
-        # 添加已存在的用户
+        # 添加已存在的用户返回Flase
         assert graph.add_user(1, "重复", ["测试"]) is False
 
-        # 添加无效ID
+        # 添加无效ID抛出ValueError
         with pytest.raises(ValueError):
             graph.add_user(0, "无效", ["测试"])
 
         with pytest.raises(ValueError):
             graph.add_user(-1, "无效", ["测试"])
 
-        # 添加自好友
+        # 添加自好友抛出ValueError
         with pytest.raises(ValueError):
             graph.add_friendship(1, 1, 1)
 
-        # 添加不存在的好友
+        # 添加不存在的好友抛出ValueError
         with pytest.raises(ValueError):
             graph.add_friendship(1, 999, 1)
 
@@ -875,12 +926,12 @@ class TestEdgeCases:
         # 将5加入黑名单
         graph.add_to_blacklist(5)
 
-        # 查询到5的路径
+        # BFS查询到5的路径应返回不可达
         dist, path = graph.get_shortest_distance(1, 5)
         assert dist == -1
         assert path == []
 
-        # Dijkstra查询
+        # Dijkstra查询也应返回不可达
         dist, path = graph.get_weighted_shortest_path(1, 5)
         assert dist == -1
         assert path == []
@@ -891,10 +942,14 @@ class TestEdgeCases:
 # ==============================================================
 # ===================== 性能测试 =====================
 class TestPerformance:
-    """性能测试"""
+    """性能测试
+    对应扩展功能D：性能优化，验证算法在大数据下的执行效率
+    """
 
     def test_performance_benchmark(self):
-        """性能基准测试"""
+        """性能基准测试
+        在200用户、500边规模下测试各算法耗时
+        """
         graph = SocialGraph()
         graph.generate_big_test_data(user_num=200, edge_num=500)
 
@@ -930,13 +985,16 @@ class TestPerformance:
 
 # ==============================================================
 # ===================== 数据一致性测试 =====================
+#验证图结构在各种操作后保持数据一致性
 class TestDataConsistency:
     """数据一致性测试"""
 
     def test_edge_weight_consistency(self, graph):
-        """边权重一致性测试"""
-        # 【修复】先添加用户，再建立好友关系
-        # 用户11可能已存在，使用更安全的添加方式
+        """边权重一致性测试
+        验证添加、更新、删除边权重数据同步
+        """
+
+        # 添加边时应更新权重
         if graph.user_attrs.get(11) is None:
             graph.add_user(11, "测试用户", ["测试"])
 
